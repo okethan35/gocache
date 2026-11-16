@@ -90,6 +90,6 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 14. Results are logged in BENCHMARKS.md at the repo root: raw go test -bench output, GOMAXPROCS, the decision, and the reason.
 
 ### Server lifecycle
-15. Closing the listener stops the server. Other accept errors are logged and retried with backoff.
+15. Closing the listener stops accepting new connections. The server stops once all open connections have ended. Other accept errors are logged and retried with backoff.
 16. A panic while serving a connection closes that connection only. The server and other connections keep running, and the store remains usable. The panic and its stack trace are logged.
 17. Fatal runtime errors (for example, concurrent map writes or out of memory) cannot be recovered and stop the server.
