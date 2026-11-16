@@ -59,3 +59,32 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 
 ### Misc
 25. Empty values ($$) will be accepted. Empty values may be stored.
+
+## 2b - Concurrency
+
+### Goroutine model
+1. Each accepted connection is served in its own goroutine. An idle or slow client must not block other clients.
+2. The store is the only state shared between connections.
+3. Each GET, SET and DEL is atomic: concurrent commands behave as if they ran one at a time in some order. Commands on one connection run in the order sent. There is no ordering guarantee across connections.
+
+### Store concurrency
+4. Access to the store from multiple goroutines is serialized with a plain sync.Mutex. Revisit only if a benchmark shows a meaningful gap at a realistic read-heavy mix.
+5. Locks live inside each method to ensure safety when multiple methods are called concurrently. The lock protects the data field on Store. It is a sync.Mutex field on Store (mu), which Get, Set, and Del take for their whole body and release with defer.
+6. The now field on Store is set only at construction, or by a test before any goroutine starts, and is never reassigned. It is not protected by the lock.
+
+### Sharded store (benchmark only)
+7. Sharded locking is implemented alongside the single-lock store so the two can be benchmarked against each other. The goal is to learn what the performance difference is. The sharded store follows Phase 1 rules 1-10 exactly. It is used only by benchmarks, not by the server.
+8. A key's shard is fnv32(key) % numShards, so the same key always maps to the same shard. fnv32 is FNV-1a, computed inline (no per-operation allocation). Each shard has its own map and its own sync.Mutex.
+9. The starting shard count is 5, an arbitrary baseline to be tuned by benchmark.
+
+### Benchmark
+10. Benchmark both stores with b.RunParallel at SetParallelism 1, 4 and 16. SetParallelism is goroutines per GOMAXPROCS, not total goroutines; record GOMAXPROCS with every result.
+11. Workload: GET/SET/DEL mix of 70/20/10, keys drawn uniformly from a fixed pool of 10,000. All 10,000 keys are loaded before the timer starts. Values are a fixed 16 bytes. SETs have no TTL. Each goroutine uses its own random source.
+12. Compare ns/op. "At least 20% faster" means sharded ns/op <= 0.80 x single-lock ns/op.
+13. If sharded is less than 20% faster at the highest parallelism level:
+    a. Verify correctness: go test -race passes, and each shard really has its own mutex.
+    b. Check that keys spread evenly: every shard holds between 15% and 25% of the 10,000 keys.
+    c. Try a different hash function (hash/maphash).
+    d. Re-run at SetParallelism 64.
+    e. If it is still less than 20% faster, or it is slower, keep the single lock and log why.
+14. Results are logged in BENCHMARKS.md at the repo root: raw go test -bench output, GOMAXPROCS, the decision, and the reason.
