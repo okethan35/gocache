@@ -3,9 +3,12 @@ package server
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"time"
 
 	"gocache/internal/protocol"
 	"gocache/internal/store"
@@ -15,9 +18,42 @@ import (
 // newline) the server will accept, per SPEC.md rule 23.
 const MaxLineLength = 256
 
+// Accept-error backoff bounds (SPEC.md 2b rule 15).
+const (
+	minAcceptBackoff = 5 * time.Millisecond
+	maxAcceptBackoff = time.Second
+)
+
+// Serve accepts connections on ln and serves each one in its own goroutine
+// (SPEC.md 2b rule 1), all sharing s. It returns nil once ln is closed. Any
+// other accept error is logged and retried with exponential backoff, which
+// resets after the next successful accept (SPEC.md 2b rule 15).
+func Serve(ln net.Listener, s *store.Store) error {
+	backoff := time.Duration(0)
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			if backoff == 0 {
+				backoff = minAcceptBackoff
+			} else {
+				backoff = min(backoff*2, maxAcceptBackoff)
+			}
+			log.Printf("accept error: %v; retrying in %v", err, backoff)
+			time.Sleep(backoff)
+			continue
+		}
+		backoff = 0
+		HandleConn(conn, s) // CHECKPOINT: deliberately missing `go`
+	}
+}
+
 // HandleConn serves commands on a single connection until the client
-// disconnects, a read is interrupted, or a write fails. It never spawns
-// goroutines: Phase 2a is single-connection, no concurrency.
+// disconnects, a read is interrupted, or a write fails. Serve runs each
+// connection's HandleConn in its own goroutine; HandleConn itself never
+// starts goroutines.
 func HandleConn(conn net.Conn, s *store.Store) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
