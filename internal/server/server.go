@@ -46,7 +46,7 @@ func Serve(ln net.Listener, s *store.Store) error {
 			continue
 		}
 		backoff = 0
-		HandleConn(conn, s) // CHECKPOINT: deliberately missing `go`
+		go HandleConn(conn, s)
 	}
 }
 
