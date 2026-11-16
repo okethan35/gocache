@@ -46,9 +46,20 @@ func Serve(ln net.Listener, s *store.Store) error {
 			continue
 		}
 		backoff = 0
-		go HandleConn(conn, s)
+		go serveConn(conn, s)
 	}
 }
+
+// serveConn runs HandleConn for one connection in the goroutine Serve starts.
+// CHECKPOINT: no panic recovery yet (SPEC.md 2b rule 16).
+func serveConn(conn net.Conn, s *store.Store) {
+	HandleConn(conn, s)
+}
+
+// dispatch is what HandleConn calls to execute a line. It is a variable only
+// so tests can inject a panic; like Store.now, it is set before any goroutine
+// starts and never reassigned while the server runs.
+var dispatch = Dispatch
 
 // HandleConn serves commands on a single connection until the client
 // disconnects, a read is interrupted, or a write fails. Serve runs each
@@ -73,7 +84,7 @@ func HandleConn(conn net.Conn, s *store.Store) {
 			continue
 		}
 
-		if _, werr := io.WriteString(conn, Dispatch(s, line)); werr != nil {
+		if _, werr := io.WriteString(conn, dispatch(s, line)); werr != nil {
 			return
 		}
 	}
