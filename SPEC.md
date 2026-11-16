@@ -88,3 +88,6 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
     d. Re-run at SetParallelism 64.
     e. If it is still less than 20% faster, or it is slower, keep the single lock and log why.
 14. Results are logged in BENCHMARKS.md at the repo root: raw go test -bench output, GOMAXPROCS, the decision, and the reason.
+
+### Server lifecycle
+15. Closing the listener stops the server. Other accept errors are logged and retried with backoff.
