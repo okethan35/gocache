@@ -1,9 +1,13 @@
 // internal/store/store.go
 package store
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 type Store struct {
+	mu   sync.Mutex // guards data; held for the whole body of Get/Set/Del
 	data map[string]entry
 	now  func() time.Time // defaults to time.Now, but swappable in tests
 }
@@ -32,6 +36,9 @@ func (s *Store) isExpired(e entry) bool {
 // missing or expired. Expiry is checked lazily here; an expired entry found
 // during Get is deleted from the map before reporting the miss.
 func (s *Store) Get(key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	e, ok := s.data[key]
 	if !ok {
 		return "", false
@@ -48,6 +55,9 @@ func (s *Store) Get(key string) (string, bool) {
 // -1, which gets clamped to -1) means no expiration. Setting on an empty key
 // is a no-op. Returns 1 if the key was set, 0 otherwise.
 func (s *Store) Set(key, value string, ttlSeconds int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if key == "" {
 		return 0
 	}
@@ -72,6 +82,9 @@ func (s *Store) Set(key, value string, ttlSeconds int) int {
 // (already treated as absent) all return 0. An expired entry found here is
 // still physically removed from the map as a cleanup side effect.
 func (s *Store) Del(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if key == "" {
 		return 0
 	}
