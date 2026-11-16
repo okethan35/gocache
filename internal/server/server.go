@@ -8,6 +8,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"runtime/debug"
+	"sync"
 	"time"
 
 	"gocache/internal/protocol"
@@ -25,15 +27,19 @@ const (
 )
 
 // Serve accepts connections on ln and serves each one in its own goroutine
-// (SPEC.md 2b rule 1), all sharing s. It returns nil once ln is closed. Any
-// other accept error is logged and retried with exponential backoff, which
-// resets after the next successful accept (SPEC.md 2b rule 15).
+// (SPEC.md 2b rule 1), all sharing s. Once ln is closed it stops accepting,
+// waits for every open connection to end, and returns nil, so nothing Serve
+// started is still running after it returns. Any other accept error is logged
+// and retried with exponential backoff, which resets after the next
+// successful accept (SPEC.md 2b rule 15).
 func Serve(ln net.Listener, s *store.Store) error {
+	var conns sync.WaitGroup
 	backoff := time.Duration(0)
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
+				conns.Wait()
 				return nil
 			}
 			if backoff == 0 {
@@ -46,13 +52,22 @@ func Serve(ln net.Listener, s *store.Store) error {
 			continue
 		}
 		backoff = 0
-		go serveConn(conn, s)
+		conns.Go(func() { serveConn(conn, s) })
 	}
 }
 
 // serveConn runs HandleConn for one connection in the goroutine Serve starts.
-// CHECKPOINT: no panic recovery yet (SPEC.md 2b rule 16).
+// A panic is recovered and logged with its stack trace, so it closes only this
+// connection (HandleConn's deferred Close still runs while unwinding) and the
+// server keeps running (SPEC.md 2b rule 16). Fatal runtime errors cannot be
+// recovered (rule 17).
 func serveConn(conn net.Conn, s *store.Store) {
+	remote := conn.RemoteAddr()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("panic serving %v: %v\n%s", remote, r, debug.Stack())
+		}
+	}()
 	HandleConn(conn, s)
 }
 
