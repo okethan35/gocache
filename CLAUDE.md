@@ -51,6 +51,7 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - Missing snapshot: start empty. Corrupt snapshot: refuse to start, naming the file.
 - TTLs are stored as absolute wall-clock Unix nanoseconds; a clock jump between save and load shifts expiries (known limitation).
 - run(ctx, ln, expiryInterval, snapshotInterval, path) is main's testable body; tests pass a t.TempDir path.
+- Save failures: saveFile goes through an internal fileSystem interface so tests can fail any single step (fakeFS) and check step order; one end-to-end test uses a real non-empty directory at the snapshot path to make the rename fail. A failed periodic save is logged and retried next tick; a failed save leaves the old snapshot and no temp file (except a failed directory fsync, after which the new file is in place but the save still reports an error).
 
 ## Phase 6 decisions (done)
 - server.ServeConfig(ctx, ln, s, Config{MaxClients, IdleTimeout, WriteTimeout}); zero fields mean the defaults (1000, 5m, 10s). ServeContext and Serve use the defaults.
@@ -62,5 +63,5 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 
 ## Carried into the next phase
 - REVISIT: padded sharded store (BENCHMARKS.md) vs the single lock for the server.
-- Untested: a failing final or periodic save, and crash-durability of the directory fsync (need a fault-injecting filesystem).
+- Crash durability can only be checked in-process as step order (write, fsync file, close, rename, fsync dir); a real power-loss test would need a VM or fault-injecting block device.
 - Snapshot peak memory is about 3x the store (data, Export copy, encoded file in memory); streaming Write would remove the third copy.
