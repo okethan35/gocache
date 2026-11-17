@@ -27,13 +27,46 @@ const (
 	maxAcceptBackoff = time.Second
 )
 
+// shutdownWriteGrace is how long each connection may keep writing once
+// shutdown starts (SPEC.md Phase 4 rule 6).
+const shutdownWriteGrace = time.Second
+
 // Serve accepts connections on ln and serves each one in its own goroutine
 // (SPEC.md 2b rule 1), all sharing s. Once ln is closed it stops accepting,
-// waits for every open connection to end, and returns nil, so nothing Serve
-// started is still running after it returns. Any other accept error is logged
-// and retried with exponential backoff, which resets after the next
-// successful accept (SPEC.md 2b rule 15).
+// waits for every open connection to end, and returns nil. It is ServeContext
+// with a context that is never cancelled (SPEC.md Phase 4 rule 8).
 func Serve(ln net.Listener, s *store.Store) error {
+	return ServeContext(context.Background(), ln, s)
+}
+
+// ServeContext serves like Serve, and cancelling ctx starts a graceful
+// shutdown (SPEC.md Phase 4): stop accepting (rule 3), wake every connection
+// blocked on a read so it closes (rule 4) while letting a command already
+// running finish and write its response (rule 5), and give each connection
+// shutdownWriteGrace to finish writing (rule 6). It returns nil once every
+// connection has ended, so nothing it started outlives it. Accept errors other
+// than a closed listener are logged and retried with exponential backoff that
+// resets after the next successful accept (2b rule 15); a shutdown interrupts
+// the backoff (Phase 4 rule 10).
+func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
+	tracker := &connTracker{open: make(map[net.Conn]struct{})}
+
+	quit := make(chan struct{})
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctx.Done():
+			ln.Close()
+			tracker.shutdown()
+		case <-quit:
+		}
+	}()
+	defer func() {
+		close(quit)
+		<-watcherDone
+	}()
+
 	var conns sync.WaitGroup
 	backoff := time.Duration(0)
 	for {
@@ -49,18 +82,64 @@ func Serve(ln net.Listener, s *store.Store) error {
 				backoff = min(backoff*2, maxAcceptBackoff)
 			}
 			log.Printf("accept error: %v; retrying in %v", err, backoff)
-			time.Sleep(backoff)
+			timer := time.NewTimer(backoff)
+			select {
+			case <-timer.C:
+			case <-ctx.Done(): // the watcher closes ln, so the next Accept returns ErrClosed
+				timer.Stop()
+			}
 			continue
 		}
 		backoff = 0
-		conns.Go(func() { serveConn(conn, s) })
+		tracker.add(conn)
+		conns.Go(func() {
+			defer tracker.remove(conn)
+			serveConn(conn, s)
+		})
 	}
 }
 
-// ServeContext is Serve with graceful shutdown (SPEC.md Phase 4).
-// CHECKPOINT: stub that ignores ctx.
-func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
-	return Serve(ln, s)
+// connTracker remembers open connections so shutdown can reach them.
+type connTracker struct {
+	mu           sync.Mutex
+	open         map[net.Conn]struct{}
+	shuttingDown bool
+}
+
+// add registers conn. A connection accepted just as shutdown starts gets the
+// shutdown deadlines immediately.
+func (t *connTracker) add(conn net.Conn) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.open[conn] = struct{}{}
+	if t.shuttingDown {
+		setShutdownDeadlines(conn)
+	}
+}
+
+func (t *connTracker) remove(conn net.Conn) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.open, conn)
+}
+
+// shutdown applies the shutdown deadlines to every open connection.
+func (t *connTracker) shutdown() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.shuttingDown = true
+	for conn := range t.open {
+		setShutdownDeadlines(conn)
+	}
+}
+
+// setShutdownDeadlines makes any read on conn fail now, which ends HandleConn
+// through its normal read-error path, while a response being written still has
+// shutdownWriteGrace to finish.
+func setShutdownDeadlines(conn net.Conn) {
+	now := time.Now()
+	conn.SetReadDeadline(now)
+	conn.SetWriteDeadline(now.Add(shutdownWriteGrace))
 }
 
 // serveConn runs HandleConn for one connection in the goroutine Serve starts.

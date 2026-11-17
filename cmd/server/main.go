@@ -5,6 +5,9 @@ import (
 	"context"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"gocache/internal/server"
@@ -19,23 +22,43 @@ const (
 )
 
 func main() {
+	// SIGINT or SIGTERM starts a graceful shutdown (SPEC.md Phase 4 rule 1).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// Once the first signal arrives, restore default signal handling, so a
+	// second SIGINT or SIGTERM kills the process immediately (rule 2).
+	context.AfterFunc(ctx, stop)
+
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", addr, err)
 	}
-	log.Printf("gocache listening on %s", addr)
-
-	s := store.New()
-	stopExpiry := s.StartExpiry(expiryInterval)
-	defer stopExpiry()
-
-	if err := server.Serve(ln, s); err != nil {
+	if err := run(ctx, ln, expiryInterval); err != nil {
 		log.Fatalf("server stopped: %v", err)
 	}
 }
 
-// run serves on ln until ctx is cancelled (SPEC.md Phase 4).
-// CHECKPOINT: stub that ignores ctx.
+// run serves on ln with the active-expiry sweep running, until ctx is
+// cancelled. Then it shuts down in the order SPEC.md Phase 4 rule 9 gives:
+// log "shutting down", stop accepting and drain connections, stop the sweep,
+// log "stopped".
 func run(ctx context.Context, ln net.Listener, interval time.Duration) error {
-	return server.Serve(ln, store.New())
+	log.Printf("gocache listening on %s", ln.Addr())
+
+	s := store.New()
+	stopExpiry := s.StartExpiry(interval)
+
+	logged := make(chan struct{})
+	stopLog := context.AfterFunc(ctx, func() {
+		log.Print("shutting down")
+		close(logged)
+	})
+
+	err := server.ServeContext(ctx, ln, s)
+	if !stopLog() { // the shutdown log ran (or is running): keep it before "stopped"
+		<-logged
+	}
+	stopExpiry()
+	log.Print("stopped")
+	return err
 }

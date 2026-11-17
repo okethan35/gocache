@@ -36,4 +36,3 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 
 ## Carried into the next phase
 - REVISIT: padded sharded store (BENCHMARKS.md) vs the single lock for the server.
-- REVISIT: main never calls the expiry stop function or closes the listener, since there is no shutdown path yet.
