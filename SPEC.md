@@ -82,7 +82,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 11. Workload: GET/SET/DEL mix of 70/20/10, keys drawn uniformly from a fixed pool of 10,000. All 10,000 keys are loaded before the timer starts. Values are a fixed 16 bytes. SETs have no TTL. Each goroutine uses its own random source.
 12. Compare ns/op. "At least 20% faster" means sharded ns/op <= 0.80 x single-lock ns/op.
 13. If sharded is less than 20% faster at the highest parallelism level:
-    a. Verify correctness: go test -race passes, and each shard really has its own mutex.
+    a. Verify correctness: go test -race passes, and each shard really has its own mutex, on its own cache line (no false sharing between shards).
     b. Check that keys spread evenly: every shard holds between 15% and 25% of the 10,000 keys.
     c. Try a different hash function (hash/maphash).
     d. Re-run at SetParallelism 64.

@@ -1,7 +1,7 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store) and Phase 2a (protocol + single-connection TCP server) are done; Phase 2b (concurrency) is in progress. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) are done. The next phase is not yet specified. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
@@ -16,12 +16,15 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store) and Phase 
 - entry struct uses an explicit hasExpiry bool, not a zero-value time.Time sentinel, for representing "no expiration".
 - Follow SPEC.md exactly for edge case behavior (empty keys, negative TTLs, overwrite semantics, wire format). Don't infer or improvise on ambiguous cases, ask.
 
-## Current phase
-Phase 2b: concurrency. Decisions so far:
+## Phase 2b decisions (done)
 - Store uses a plain sync.Mutex (mu field on Store), locked for the whole body of Get/Set/Del and released with defer. Revisit only if a benchmark shows a meaningful gap at a realistic read-heavy mix.
 - `now` is set only at construction (or by a test before any goroutine starts) and never reassigned, so it needs no lock.
-- A sharded store is built alongside the single-lock store for benchmarking: shard = fnv32(key) % numShards, each shard with its own map and mutex, starting at 5 shards. Benchmark with b.RunParallel at SetParallelism 1/4/16, 70/20/10 GET/SET/DEL mix, 10,000 uniform keys, comparing ns/op. If sharded is <20% faster at the highest parallelism: verify go test -race and per-shard mutexes, check key spread, try another hash, re-run higher. If still <20% or slower, keep the single lock and log why.
+- A sharded store is built alongside the single-lock store for benchmarking: shard = fnv32(key) % numShards, each shard with its own map and mutex, starting at 5 shards. Result: sharded was only ~10% faster (ratio 0.90), so the single lock is kept; see BENCHMARKS.md. Padding shards onto separate cache lines reached 0.56; switching the server to it is deferred. Benchmark spec: b.RunParallel at SetParallelism 1/4/16, 70/20/10 GET/SET/DEL mix, 10,000 uniform keys, comparing ns/op. If sharded is <20% faster at the highest parallelism: verify go test -race and per-shard mutexes, check key spread, try another hash, re-run higher. If still <20% or slower, keep the single lock and log why.
 - Goroutine model: one goroutine per connection; the store is the only shared state. The accept loop moves from cmd/server into internal/server so the goroutine model can be tested.
 - The concurrent store test must fail under plain `go test` (no -race) when the lock is missing. REVISIT LATER: whether it should instead (or also) rely on `go test -race`.
 - Panic recovery: a deferred recover in the goroutine Serve starts per connection; a panic closes only that connection and is logged with its stack trace. Fatal runtime errors are not recoverable.
 - Serve waits for all open connections to end before returning after the listener closes, so nothing it started outlives it. Full graceful shutdown (closing open connections) is out of scope for 2b.
+
+## Carried into the next phase
+- REVISIT: concurrency tests rely on plain `go test`. The panic-test data race in 2b was caught only by `-race`, which argues for also running `-race`.
+- REVISIT: padded sharded store (BENCHMARKS.md) vs the single lock for the server.
