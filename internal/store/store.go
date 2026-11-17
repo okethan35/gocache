@@ -11,7 +11,6 @@ type Store struct {
 	data map[string]entry
 	// expires indexes the keys in data whose entry has an expiry, so the
 	// active-expiry sweep samples only TTL keys (SPEC.md Phase 3 rule 5).
-	// CHECKPOINT: not maintained yet.
 	expires map[string]struct{}
 	now     func() time.Time // defaults to time.Now, but swappable in tests
 }
@@ -49,7 +48,7 @@ func (s *Store) Get(key string) (string, bool) {
 		return "", false
 	}
 	if s.isExpired(e) {
-		delete(s.data, key)
+		s.remove(key)
 		return "", false
 	}
 	return e.value, true
@@ -72,12 +71,14 @@ func (s *Store) Set(key, value string, ttlSeconds int) int {
 
 	if ttlSeconds == -1 {
 		s.data[key] = entry{value: value, hasExpiry: false}
+		delete(s.expires, key)
 	} else {
 		s.data[key] = entry{
 			value:     value,
 			hasExpiry: true,
 			expiresAt: s.now().Add(time.Duration(ttlSeconds) * time.Second),
 		}
+		s.expires[key] = struct{}{}
 	}
 	return 1
 }
@@ -98,9 +99,15 @@ func (s *Store) Del(key string) int {
 		return 0
 	}
 	if s.isExpired(e) {
-		delete(s.data, key)
+		s.remove(key)
 		return 0
 	}
-	delete(s.data, key)
+	s.remove(key)
 	return 1
+}
+
+// remove deletes key from data and from the TTL index. Callers hold s.mu.
+func (s *Store) remove(key string) {
+	delete(s.data, key)
+	delete(s.expires, key)
 }

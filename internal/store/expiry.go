@@ -28,20 +28,21 @@ func (s *Store) sweep() int {
 }
 
 // sweepRound holds the lock for one round only, so clients can run between
-// rounds (rule 3). Ranging over a map starts at a random position, so stopping
-// after sweepSampleSize entries is a cheap, non-uniform sample (rule 5).
-// Deleting the current key while ranging is allowed in Go.
+// rounds (rule 3). It samples only TTL keys, by ranging over the TTL index
+// (rule 5). Ranging over a map starts at a random position, so stopping after
+// sweepSampleSize keys is a cheap, non-uniform sample (rule 5a). Deleting the
+// current key while ranging is allowed in Go.
 func (s *Store) sweepRound() (examined, expired int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for key, e := range s.data {
+	for key := range s.expires {
 		if examined == sweepSampleSize {
 			break
 		}
 		examined++
-		if s.isExpired(e) {
-			delete(s.data, key)
+		if s.isExpired(s.data[key]) {
+			s.remove(key)
 			expired++
 		}
 	}

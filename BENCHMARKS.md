@@ -104,3 +104,16 @@ BenchmarkStores/sharded/p=16-4       	 4245966	       297.2 ns/op
 PASS
 ok  	gocache/internal/store	57.333s
 ```
+
+## Phase 3: TTL index cost (single-lock Store)
+Adding the TTL index (SPEC.md Phase 3 rule 5) puts one extra map operation in
+every Set. Same benchmark, same machine, before vs after (benchstat, n=6): no
+statistically significant change at any SetParallelism (p=0.39 to 0.59).
+
+| SetParallelism | before | after |
+|---|---|---|
+| 1  | 205.6 ns ± 15% | 192.6 ns ± 19% |
+| 4  | 343.1 ns ± 8%  | 322.1 ns ± 25% |
+| 16 | 333.9 ns ± 12% | 324.4 ns ± 17% |
+
+The benchmark's SETs have no TTL, so this measures the delete-from-index path only.
