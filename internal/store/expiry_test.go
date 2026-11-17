@@ -132,3 +132,66 @@ func TestStartExpiryPanicsOnNonPositiveInterval(t *testing.T) {
 		}()
 	}
 }
+
+// SPEC.md Phase 3 rule 5: the sweep samples only TTL keys, so a large number
+// of no-TTL keys cannot hide the expired ones. Sampling all entries would
+// usually examine mostly no-TTL keys here and stop after one round.
+func TestSweepFindsExpiredAmongManyNoTTLKeys(t *testing.T) {
+	clock := time.Now()
+	s := newFrozenStore(&clock)
+	for i := 0; i < 1000; i++ {
+		s.Set("forever"+strconv.Itoa(i), "v", -1)
+	}
+	for i := 0; i < 20; i++ {
+		s.Set("expired"+strconv.Itoa(i), "v", 0) // ttl 0: expired immediately
+	}
+
+	s.sweep()
+
+	if len(s.data) != 1000 {
+		t.Errorf("expected all 20 expired keys swept and 1000 no-TTL keys kept, got %d entries", len(s.data))
+	}
+}
+
+// SPEC.md Phase 3 rule 5: the TTL index holds exactly the keys whose entry
+// has an expiry, through every way a key can be written or removed.
+func TestTTLIndexMatchesEntries(t *testing.T) {
+	clock := time.Now()
+	s := newFrozenStore(&clock)
+
+	s.Set("ttl", "v", 100)     // added with a ttl
+	s.Set("forever", "v", -1)  // never in the index
+	s.Set("demoted", "v", 100) // ttl, then overwritten with no expiration
+	s.Set("demoted", "v", -1)
+	s.Set("promoted", "v", -1) // no expiration, then overwritten with a ttl
+	s.Set("promoted", "v", 100)
+	s.Set("deleted", "v", 100) // removed by Del
+	s.Del("deleted")
+	s.Set("lazyget", "v", 1) // removed lazily by Get once expired
+	s.Set("lazydel", "v", 1) // removed lazily by Del once expired
+	s.Set("swept", "v", 1)   // removed by the sweep once expired
+	clock = clock.Add(2 * time.Second)
+	s.Get("lazyget")
+	s.Del("lazydel")
+	s.sweep()
+
+	want := map[string]bool{}
+	for k, e := range s.data {
+		if e.hasExpiry && !s.isExpired(e) {
+			want[k] = true
+		}
+	}
+	if len(s.expires) != len(want) {
+		t.Errorf("expected TTL index to hold %d keys %v, got %d: %v", len(want), want, len(s.expires), s.expires)
+	}
+	for k := range want {
+		if _, ok := s.expires[k]; !ok {
+			t.Errorf("expected %q in the TTL index", k)
+		}
+	}
+	for k := range s.expires {
+		if !want[k] {
+			t.Errorf("expected %q not to be in the TTL index", k)
+		}
+	}
+}

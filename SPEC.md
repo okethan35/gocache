@@ -106,7 +106,8 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 ### Sweep
 3. Each tick runs up to 16 rounds. A round takes the store lock, examines up to 20 entries, deletes the expired ones, and releases the lock, so clients can run between rounds.
 4. Another round runs only if more than 25% of the entries examined in the current round were expired.
-5. Entries are sampled by ranging over the map and stopping after 20. Go starts map iteration at a random position, so this is a cheap approximation of random sampling, not a uniform one.
+5. The sweep samples only keys that have a TTL. The store keeps an index of exactly the keys whose entry has an expiry: Set with a ttl adds the key, Set with no expiration removes it, and every deletion (Del, a lazy delete in Get or Del, the sweep) removes it. The 25% threshold in rule 4 is measured over these TTL keys.
+5a. Keys are sampled by ranging over the TTL index and stopping after 20. Go starts map iteration at a random position, so this is a cheap approximation of random sampling, not a uniform one.
 
 ### Lifecycle
 6. The sweep is started with Store.StartExpiry(interval), which returns a stop function. New() does not start it. stop() returns only after the sweep goroutine has exited. StartExpiry panics if interval is zero or negative.

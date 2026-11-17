@@ -9,20 +9,25 @@ import (
 type Store struct {
 	mu   sync.Mutex // guards data; held for the whole body of Get/Set/Del
 	data map[string]entry
-	now  func() time.Time // defaults to time.Now, but swappable in tests
+	// expires indexes the keys in data whose entry has an expiry, so the
+	// active-expiry sweep samples only TTL keys (SPEC.md Phase 3 rule 5).
+	// CHECKPOINT: not maintained yet.
+	expires map[string]struct{}
+	now     func() time.Time // defaults to time.Now, but swappable in tests
 }
 
 func New() *Store {
 	return &Store{
-		data: make(map[string]entry),
-		now:  time.Now,
+		data:    make(map[string]entry),
+		expires: make(map[string]struct{}),
+		now:     time.Now,
 	}
 }
 
 type entry struct {
-	value      string
-	expiresAt  time.Time
-	hasExpiry  bool // false means expiresAt is meaningless/ignored
+	value     string
+	expiresAt time.Time
+	hasExpiry bool // false means expiresAt is meaningless/ignored
 }
 
 // isExpired reports whether e has an expiry that has been reached or passed
