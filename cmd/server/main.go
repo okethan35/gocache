@@ -62,3 +62,9 @@ func run(ctx context.Context, ln net.Listener, interval time.Duration) error {
 	log.Print("stopped")
 	return err
 }
+
+// runPersistent is run with persistence (SPEC.md Phase 5).
+// CHECKPOINT: stub that ignores path.
+func runPersistent(ctx context.Context, ln net.Listener, expiryInterval, snapshotInterval time.Duration, path string) error {
+	return run(ctx, ln, expiryInterval)
+}
