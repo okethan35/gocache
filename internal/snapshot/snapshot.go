@@ -152,16 +152,25 @@ func (d *decoder) str() string {
 // SaveFile writes recs to path atomically (SPEC.md Phase 5 rule 10): write a
 // temporary file in the same directory, flush it to disk, rename it over
 // path, then flush the directory so the rename itself survives a crash.
-func SaveFile(path string, recs []store.Record) (err error) {
+// If any step fails, the previous snapshot is unchanged and the temporary
+// file is removed (rule 15).
+func SaveFile(path string, recs []store.Record) error {
+	return saveFile(osFS{}, path, recs)
+}
+
+func saveFile(fsys fileSystem, path string, recs []store.Record) (err error) {
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".gocache-*.tmp")
+	tmp, err := fsys.CreateTemp(dir, ".gocache-*.tmp")
 	if err != nil {
 		return fmt.Errorf("snapshot %s: %w", path, err)
 	}
+	renamed := false
 	defer func() {
 		if err != nil {
-			tmp.Close()
-			os.Remove(tmp.Name())
+			if !renamed {
+				tmp.Close() // may already be closed; the error is irrelevant here
+				fsys.Remove(tmp.Name())
+			}
 			err = fmt.Errorf("snapshot %s: %w", path, err)
 		}
 	}()
@@ -179,9 +188,39 @@ func SaveFile(path string, recs []store.Record) (err error) {
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmp.Name(), path); err != nil {
+	if err = fsys.Rename(tmp.Name(), path); err != nil {
 		return err
 	}
+	renamed = true
+	// The new snapshot is in place; flushing the directory makes the rename
+	// itself durable. If this fails the save is still reported as failed.
+	return fsys.SyncDir(dir)
+}
+
+// fileSystem is the handful of file operations saveFile needs. Production
+// uses osFS; tests substitute a fake that can fail any single step and
+// records the order of operations.
+type fileSystem interface {
+	CreateTemp(dir, pattern string) (tempFile, error)
+	Rename(oldpath, newpath string) error
+	Remove(name string) error
+	SyncDir(dir string) error
+}
+
+type tempFile interface {
+	io.Writer
+	Sync() error
+	Close() error
+	Name() string
+}
+
+type osFS struct{}
+
+func (osFS) CreateTemp(dir, pattern string) (tempFile, error) { return os.CreateTemp(dir, pattern) }
+func (osFS) Rename(oldpath, newpath string) error             { return os.Rename(oldpath, newpath) }
+func (osFS) Remove(name string) error                         { return os.Remove(name) }
+
+func (osFS) SyncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
 		return err
@@ -223,6 +262,12 @@ func Start(s *store.Store, path string, interval time.Duration) (stop func()) {
 // channel instead of a real ticker. A failed periodic save is logged and the
 // loop keeps going; the next tick tries again.
 func startLoop(s *store.Store, path string, ticks <-chan time.Time) (stop func()) {
+	return startLoopWith(s, path, ticks, SaveFile)
+}
+
+// startLoopWith is startLoop with the save function injected, so tests can
+// make a save fail (SPEC.md Phase 5 rule 14).
+func startLoopWith(s *store.Store, path string, ticks <-chan time.Time, save func(string, []store.Record) error) (stop func()) {
 	quit := make(chan struct{})
 	exited := make(chan struct{})
 	go func() {
@@ -232,7 +277,7 @@ func startLoop(s *store.Store, path string, ticks <-chan time.Time) (stop func()
 			case <-quit:
 				return
 			case <-ticks:
-				if err := SaveFile(path, s.Export()); err != nil {
+				if err := save(path, s.Export()); err != nil {
 					log.Printf("periodic snapshot failed: %v", err)
 				}
 			}
