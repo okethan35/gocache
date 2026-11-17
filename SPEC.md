@@ -138,3 +138,36 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 8. server.ServeContext(ctx, ln, s) serves like Serve; cancelling ctx starts shutdown. It returns nil once every connection has ended. Serve(ln, s) is ServeContext with a context that is never cancelled.
 9. Shutdown order: signal, log "shutting down", stop accepting and drain connections, stop the expiry sweep, log "stopped", exit 0.
 10. A shutdown during an accept-error backoff does not wait for the backoff to finish.
+
+
+# Phase 5 spec
+
+## Persistence
+
+### Model
+1. Persistence is by snapshot: the whole store is written to one file. Writes made after the last snapshot are lost on a crash.
+2. A snapshot is taken every 60 seconds while running, and once more during graceful shutdown after connections have drained (after Phase 4 rule 9's drain and expiry-sweep stop, before "stopped"). If that final save fails, the error is logged and the process exits with status 1.
+3. At startup the snapshot is loaded into the empty store before any connection is served.
+4. The snapshot file is dump.gocache in the working directory. An empty path disables persistence (no load, no snapshots).
+
+### Contents
+5. Each live entry is saved with its key, value, and expiry. A TTL is saved as an absolute wall-clock time (Unix nanoseconds). Known limitation: if the system clock jumps between save and load, expiries shift with it.
+6. Entries already expired when the snapshot is taken are not saved. Entries that have expired by the time a snapshot is loaded are dropped.
+7. Loading adds entries to the store and keeps the TTL index (Phase 3 rule 5) in sync.
+
+### File format
+8. All integers little-endian:
+   - magic: 8 bytes "GOCACHE1"
+   - version: uint32, currently 1
+   - count: uint64, number of entries
+   - each entry: key length uint32, key bytes, value length uint32, value bytes, hasExpiry uint8 (0 or 1), expiresAt int64 Unix nanoseconds (0 when hasExpiry is 0)
+   - checksum: uint32 CRC-32 (IEEE) of every byte before it
+9. Wrong magic, an unknown version, a checksum mismatch, a truncated file, or bytes left over after the entries make the file corrupt.
+
+### Writing
+10. A snapshot is written to a temporary file in the same directory, flushed to disk, renamed over the old snapshot, and then the directory is flushed. A crash at any point leaves either the complete old snapshot or the complete new one.
+11. Taking a snapshot holds the store lock only while copying the entries; the file is written with the lock released. Each snapshot reflects the store at one instant.
+
+### Loading problems
+12. A missing snapshot file is normal (first run): log it and start empty.
+13. A corrupt snapshot file stops startup with an error naming the file, exit status 1. The server never starts empty over a corrupt file.

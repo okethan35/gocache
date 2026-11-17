@@ -1,7 +1,7 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry) and Phase 4 (graceful shutdown) are done. The next phase is not yet specified. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry) and Phase 4 (graceful shutdown) are done. Phase 5 (persistence) is in progress. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
@@ -14,6 +14,7 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - internal/store holds all store logic, no networking code goes here.
 - internal/store may start goroutines for store maintenance (the active-expiry sweep), but every goroutine it starts must have a stop function that waits for it to exit.
 - internal/protocol holds wire-format parsing only, no store or networking code.
+- internal/snapshot holds the snapshot file format and atomic file writing; it depends on internal/store, never the reverse.
 - internal/server holds connection handling and command dispatch.
 - entry struct uses an explicit hasExpiry bool, not a zero-value time.Time sentinel, for representing "no expiration".
 - Follow SPEC.md exactly for edge case behavior (empty keys, negative TTLs, overwrite semantics, wire format). Don't infer or improvise on ambiguous cases, ask.
