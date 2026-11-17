@@ -181,3 +181,72 @@ BenchmarkStores/sharded/p=16-4       	 5122470	       219.2 ns/op
 ### Stage B prediction (recorded before any run)
 Sharded/single ns/op ratio through the server: about **0.8**.
 Reasoning: network overhead dominates each request.
+
+### Stage B: through the server (decides the switch)
+BenchmarkServer: same 70/20/10 mix over 10,000 uniform keys, but every
+operation is a full request/reply round trip over loopback, one connection per
+goroutine (SetParallelism 1/4/16 = 4/16/64 clients). Clients and server share
+the same 4 CPUs. benchstat n=6.
+
+| SetParallelism | single | sharded (padded) | ratio |
+|---|---|---|---|
+| 1  | 7.579 µs ± 3% | 7.584 µs ± 5% | 1.00 (no significant difference, p=0.97) |
+| 4  | 4.535 µs ± 3% | 4.575 µs ± 4% | 1.01 (p=0.59) |
+| 16 | 3.848 µs ± 9% | 3.931 µs ± 4% | **1.02** (p=0.39) |
+
+### Decision
+**Keep the single-lock Store in the server.** The switch required sharded to be
+at least 10% faster through the server; it is indistinguishable.
+
+### Why: the store is a small slice of each request
+At p=16 the padded shards save about 146 ns per operation (375.1 -> 229.0 ns in
+Stage A), while a round trip through the server costs about 3,850 ns. Even if
+the whole saving carried over, the best possible gain would be ~4%, inside the
+noise. The rest of each request is network reads and writes, syscalls and
+scheduling, which sharding cannot touch.
+
+Prediction 0.8 vs actual 1.02: right that network overhead dominates, but it
+dominates more than expected (the store is roughly 5-10% of a request here).
+
+```
+goos: linux
+goarch: amd64
+pkg: gocache/internal/server
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkServer/single/p=1-4         	  173481	      7372 ns/op
+BenchmarkServer/single/p=1-4         	  152496	      7737 ns/op
+BenchmarkServer/single/p=1-4         	  163502	      7591 ns/op
+BenchmarkServer/single/p=1-4         	  159836	      7567 ns/op
+BenchmarkServer/single/p=1-4         	  153273	      7448 ns/op
+BenchmarkServer/single/p=1-4         	  162319	      7616 ns/op
+BenchmarkServer/single/p=4-4         	  264868	      4545 ns/op
+BenchmarkServer/single/p=4-4         	  271712	      4470 ns/op
+BenchmarkServer/single/p=4-4         	  256198	      4525 ns/op
+BenchmarkServer/single/p=4-4         	  285049	      4512 ns/op
+BenchmarkServer/single/p=4-4         	  271093	      4680 ns/op
+BenchmarkServer/single/p=4-4         	  260565	      4586 ns/op
+BenchmarkServer/single/p=16-4        	  313868	      3767 ns/op
+BenchmarkServer/single/p=16-4        	  264646	      3781 ns/op
+BenchmarkServer/single/p=16-4        	  309751	      3817 ns/op
+BenchmarkServer/single/p=16-4        	  282886	      3878 ns/op
+BenchmarkServer/single/p=16-4        	  286059	      3938 ns/op
+BenchmarkServer/single/p=16-4        	  299929	      4184 ns/op
+BenchmarkServer/sharded/p=1-4        	  165207	      7651 ns/op
+BenchmarkServer/sharded/p=1-4        	  147919	      7383 ns/op
+BenchmarkServer/sharded/p=1-4        	  155029	      7616 ns/op
+BenchmarkServer/sharded/p=1-4        	  151951	      7832 ns/op
+BenchmarkServer/sharded/p=1-4        	  168313	      7194 ns/op
+BenchmarkServer/sharded/p=1-4        	  174956	      7551 ns/op
+BenchmarkServer/sharded/p=4-4        	  267129	      4646 ns/op
+BenchmarkServer/sharded/p=4-4        	  245856	      4592 ns/op
+BenchmarkServer/sharded/p=4-4        	  286014	      4759 ns/op
+BenchmarkServer/sharded/p=4-4        	  224071	      4508 ns/op
+BenchmarkServer/sharded/p=4-4        	  259615	      4496 ns/op
+BenchmarkServer/sharded/p=4-4        	  281504	      4558 ns/op
+BenchmarkServer/sharded/p=16-4       	  276228	      3810 ns/op
+BenchmarkServer/sharded/p=16-4       	  269054	      3974 ns/op
+BenchmarkServer/sharded/p=16-4       	  279314	      4077 ns/op
+BenchmarkServer/sharded/p=16-4       	  280650	      3859 ns/op
+BenchmarkServer/sharded/p=16-4       	  300027	      3963 ns/op
+BenchmarkServer/sharded/p=16-4       	  306964	      3898 ns/op
+```
