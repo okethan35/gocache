@@ -118,3 +118,17 @@ func TestStartExpiryStopReturns(t *testing.T) {
 		t.Errorf("expected no sweep before the first tick, got %d entries", len(s.data))
 	}
 }
+
+// SPEC.md Phase 3 rule 6: a zero or negative interval panics.
+func TestStartExpiryPanicsOnNonPositiveInterval(t *testing.T) {
+	for _, d := range []time.Duration{0, -time.Second} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("expected StartExpiry(%v) to panic", d)
+				}
+			}()
+			New().StartExpiry(d)
+		}()
+	}
+}

@@ -109,7 +109,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 5. Entries are sampled by ranging over the map and stopping after 20. Go starts map iteration at a random position, so this is a cheap approximation of random sampling, not a uniform one.
 
 ### Lifecycle
-6. The sweep is started with Store.StartExpiry(interval), which returns a stop function. New() does not start it. stop() returns only after the sweep goroutine has exited.
+6. The sweep is started with Store.StartExpiry(interval), which returns a stop function. New() does not start it. stop() returns only after the sweep goroutine has exited. StartExpiry panics if interval is zero or negative.
 7. The server starts the sweep with an interval of 100ms.
 8. SPEC.md 2b rule 6 still applies: now is set before StartExpiry is called and is never reassigned while the sweep runs.
 
