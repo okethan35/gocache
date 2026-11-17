@@ -94,7 +94,9 @@ func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
 		tracker.add(conn)
 		conns.Go(func() {
 			defer tracker.remove(conn)
-			serveConn(conn, s)
+			// Shutdown has started the moment ctx is cancelled; ctx.Err is set
+			// synchronously by cancel, before the watcher goroutine runs.
+			serveConn(conn, s, func() bool { return ctx.Err() != nil })
 		})
 	}
 }
@@ -147,14 +149,14 @@ func setShutdownDeadlines(conn net.Conn) {
 // connection (HandleConn's deferred Close still runs while unwinding) and the
 // server keeps running (SPEC.md 2b rule 16). Fatal runtime errors cannot be
 // recovered (rule 17).
-func serveConn(conn net.Conn, s *store.Store) {
+func serveConn(conn net.Conn, s *store.Store, stopping func() bool) {
 	remote := conn.RemoteAddr()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("panic serving %v: %v\n%s", remote, r, debug.Stack())
 		}
 	}()
-	HandleConn(conn, s)
+	handleConn(conn, s, stopping)
 }
 
 // dispatch is what HandleConn calls to execute a line. It is a variable only
@@ -163,10 +165,18 @@ func serveConn(conn net.Conn, s *store.Store) {
 var dispatch = Dispatch
 
 // HandleConn serves commands on a single connection until the client
-// disconnects, a read is interrupted, or a write fails. Serve runs each
-// connection's HandleConn in its own goroutine; HandleConn itself never
-// starts goroutines.
+// disconnects, a read is interrupted, or a write fails. It never stops for a
+// shutdown; ServeContext runs each connection through handleConn instead, in
+// its own goroutine. Neither starts goroutines itself.
 func HandleConn(conn net.Conn, s *store.Store) {
+	handleConn(conn, s, func() bool { return false })
+}
+
+// handleConn is HandleConn with a shutdown check: once stopping reports true,
+// no further line is executed, even one already received and buffered, and
+// the connection closes (SPEC.md Phase 4 rule 5). A line whose dispatch has
+// already begun runs to completion and its response is written.
+func handleConn(conn net.Conn, s *store.Store, stopping func() bool) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
@@ -176,6 +186,10 @@ func HandleConn(conn net.Conn, s *store.Store) {
 			// Connection closed or interrupted mid-command: discard
 			// whatever was read and close (SPEC.md rule 22).
 			return
+		}
+
+		if stopping() {
+			return // discard this line and anything after it, unexecuted
 		}
 
 		if tooLong {

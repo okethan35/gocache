@@ -1,7 +1,7 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) and Phase 3 (active expiry) are done. Phase 4 (graceful shutdown) is in progress. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry) and Phase 4 (graceful shutdown) are done. The next phase is not yet specified. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
@@ -33,6 +33,13 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - The sweep samples only TTL keys, from an `expires` index on Store kept in sync by Set and by a single remove(key) helper used for every deletion. Sampling ranges over the index (random start, not uniform).
 - StartExpiry(interval) returns a stop func that waits for the goroutine to exit; New() does not start it; a non-positive interval panics.
 - Tests drive the sweep loop through an injected tick channel, never a real ticker or sleep.
+
+## Phase 4 decisions (done)
+- SIGINT/SIGTERM start a graceful shutdown; a second signal kills the process (default handling restored after the first).
+- server.ServeContext(ctx, ln, s): cancelling ctx closes the listener, sets every open connection's read deadline to now and write deadline to now+1s, and returns nil once all connections end. Serve(ln, s) is ServeContext with a never-cancelled context, so its tests are unchanged.
+- Shutdown starts the instant ctx is cancelled: connections check ctx.Err() before executing each line, so lines already received but not started are discarded unexecuted. Only the command already executing finishes and gets its reply.
+- Client contract: a reply means the command ran; no reply means it may or may not have run and is safe to retry.
+- main's body lives in run(ctx, ln, interval) so it can be tested by cancelling ctx: log "shutting down", drain, stop the expiry sweep, log "stopped", exit 0.
 
 ## Carried into the next phase
 - REVISIT: padded sharded store (BENCHMARKS.md) vs the single lock for the server.
