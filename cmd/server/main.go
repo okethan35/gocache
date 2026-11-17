@@ -3,6 +3,9 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"gocache/internal/server"
+	"gocache/internal/snapshot"
 	"gocache/internal/store"
 )
 
@@ -19,6 +23,11 @@ const (
 
 	// expiryInterval is how often the active-expiry sweep runs (SPEC.md Phase 3 rule 7).
 	expiryInterval = 100 * time.Millisecond
+
+	// snapshotPath and snapshotInterval: where and how often the store is
+	// saved (SPEC.md Phase 5 rules 2 and 4).
+	snapshotPath     = "dump.gocache"
+	snapshotInterval = 60 * time.Second
 )
 
 func main() {
@@ -33,20 +42,45 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", addr, err)
 	}
-	if err := run(ctx, ln, expiryInterval); err != nil {
+	if err := runPersistent(ctx, ln, expiryInterval, snapshotInterval, snapshotPath); err != nil {
 		log.Fatalf("server stopped: %v", err)
 	}
 }
 
-// run serves on ln with the active-expiry sweep running, until ctx is
-// cancelled. Then it shuts down in the order SPEC.md Phase 4 rule 9 gives:
-// log "shutting down", stop accepting and drain connections, stop the sweep,
-// log "stopped".
+// run is runPersistent with persistence disabled (an empty path, SPEC.md
+// Phase 5 rule 4).
 func run(ctx context.Context, ln net.Listener, interval time.Duration) error {
-	log.Printf("gocache listening on %s", ln.Addr())
+	return runPersistent(ctx, ln, interval, 0, "")
+}
 
+// runPersistent loads the snapshot at path (SPEC.md Phase 5 rules 3, 12, 13),
+// then serves on ln with the active-expiry sweep and periodic snapshots
+// running, until ctx is cancelled. Then it shuts down in order: log "shutting
+// down", stop accepting and drain connections, stop the sweep, stop periodic
+// snapshots, save a final snapshot, log "stopped" (Phase 4 rule 9, Phase 5
+// rule 2). A failed final save is returned, so main exits with status 1.
+// An empty path disables persistence.
+func runPersistent(ctx context.Context, ln net.Listener, expiryInterval, snapshotInterval time.Duration, path string) error {
 	s := store.New()
-	stopExpiry := s.StartExpiry(interval)
+	if path != "" {
+		recs, err := snapshot.LoadFile(path)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			log.Printf("no snapshot at %s, starting empty", path)
+		case err != nil:
+			return fmt.Errorf("loading %w", err) // names the file
+		default:
+			s.Import(recs)
+			log.Printf("loaded %d entries from %s", len(recs), path)
+		}
+	}
+
+	log.Printf("gocache listening on %s", ln.Addr())
+	stopExpiry := s.StartExpiry(expiryInterval)
+	stopSnapshots := func() {}
+	if path != "" {
+		stopSnapshots = snapshot.Start(s, path, snapshotInterval)
+	}
 
 	logged := make(chan struct{})
 	stopLog := context.AfterFunc(ctx, func() {
@@ -59,12 +93,18 @@ func run(ctx context.Context, ln net.Listener, interval time.Duration) error {
 		<-logged
 	}
 	stopExpiry()
+	stopSnapshots()
+	if path != "" {
+		recs := s.Export()
+		if serr := snapshot.SaveFile(path, recs); serr != nil {
+			log.Printf("final snapshot failed: %v", serr)
+			if err == nil {
+				err = serr
+			}
+		} else {
+			log.Printf("saved %d entries to %s", len(recs), path)
+		}
+	}
 	log.Print("stopped")
 	return err
-}
-
-// runPersistent is run with persistence (SPEC.md Phase 5).
-// CHECKPOINT: stub that ignores path.
-func runPersistent(ctx context.Context, ln net.Listener, expiryInterval, snapshotInterval time.Duration, path string) error {
-	return run(ctx, ln, expiryInterval)
 }
