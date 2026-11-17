@@ -50,11 +50,12 @@ const (
 	rejectMessage    = "max clients reached\n"
 )
 
-// Config limits connections (SPEC.md Phase 6 rule 7). A zero field means the
+// Config limits connections (SPEC.md Phase 6 rule 9). A zero field means the
 // default.
 type Config struct {
-	MaxClients  int
-	IdleTimeout time.Duration
+	MaxClients   int
+	IdleTimeout  time.Duration
+	WriteTimeout time.Duration // CHECKPOINT: ignored
 }
 
 func (c Config) withDefaults() Config {
@@ -67,7 +68,7 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// ServeContext is ServeConfig with the default limits (SPEC.md Phase 6 rule 7).
+// ServeContext is ServeConfig with the default limits (SPEC.md Phase 6 rule 9).
 func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
 	return ServeConfig(ctx, ln, s, Config{})
 }
@@ -163,6 +164,11 @@ type connTracker struct {
 	mu           sync.Mutex
 	open         map[net.Conn]struct{}
 	shuttingDown bool
+}
+
+// armWrite CHECKPOINT: stub with no shutdown guard.
+func (t *connTracker) armWrite(conn net.Conn, d time.Duration) {
+	conn.SetWriteDeadline(time.Now().Add(d))
 }
 
 // tryAdd registers conn unless max connections are already open, and reports

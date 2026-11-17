@@ -188,8 +188,8 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 6. Once shutdown has started (Phase 4), restarting the idle timeout never overrides the shutdown deadline.
 
 ### Write timeout
-8. Each reply must be fully written within 10 seconds. A client that does not read its replies is closed once a reply misses that deadline, freeing its slot.
-9. Once shutdown has started, setting the write timeout never overrides the shutdown write deadline (Phase 4 rule 6).
+7. Each reply must be fully written within 10 seconds. A client that does not read its replies is closed once a reply misses that deadline, freeing its slot.
+8. Once shutdown has started, setting the write timeout never overrides the shutdown write deadline (Phase 4 rule 6).
 
 ### API
-7. server.Config{MaxClients, IdleTimeout, WriteTimeout} and server.ServeConfig(ctx, ln, s, cfg). A zero field means the default (1000, 5 minutes, 10 seconds). ServeContext and Serve use the defaults.
+9. server.Config{MaxClients, IdleTimeout, WriteTimeout} and server.ServeConfig(ctx, ln, s, cfg). A zero field means the default (1000, 5 minutes, 10 seconds). ServeContext and Serve use the defaults.
