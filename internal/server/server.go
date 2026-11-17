@@ -3,6 +3,7 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -54,6 +55,12 @@ func Serve(ln net.Listener, s *store.Store) error {
 		backoff = 0
 		conns.Go(func() { serveConn(conn, s) })
 	}
+}
+
+// ServeContext is Serve with graceful shutdown (SPEC.md Phase 4).
+// CHECKPOINT: stub that ignores ctx.
+func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
+	return Serve(ln, s)
 }
 
 // serveConn runs HandleConn for one connection in the goroutine Serve starts.

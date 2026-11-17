@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net"
 	"time"
@@ -31,4 +32,10 @@ func main() {
 	if err := server.Serve(ln, s); err != nil {
 		log.Fatalf("server stopped: %v", err)
 	}
+}
+
+// run serves on ln until ctx is cancelled (SPEC.md Phase 4).
+// CHECKPOINT: stub that ignores ctx.
+func run(ctx context.Context, ln net.Listener, interval time.Duration) error {
+	return server.Serve(ln, store.New())
 }
