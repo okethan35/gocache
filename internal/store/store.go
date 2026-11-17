@@ -1,24 +1,39 @@
 // internal/store/store.go
 package store
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 type Store struct {
+	mu   sync.Mutex // guards data; held for the whole body of Get/Set/Del
 	data map[string]entry
-	now  func() time.Time // defaults to time.Now, but swappable in tests
+	// expires indexes the keys in data whose entry has an expiry, so the
+	// active-expiry sweep samples only TTL keys (SPEC.md Phase 3 rule 5).
+	expires map[string]struct{}
+	now     func() time.Time // defaults to time.Now, but swappable in tests
 }
 
 func New() *Store {
-	return &Store{
-		data: make(map[string]entry),
-		now:  time.Now,
-	}
+	s := &Store{}
+	s.init()
+	return s
+}
+
+// init prepares a zero Store in place. It exists so a Store can live inside a
+// larger struct (the padded shards) without being copied, since a Store holds
+// a mutex.
+func (s *Store) init() {
+	s.data = make(map[string]entry)
+	s.expires = make(map[string]struct{})
+	s.now = time.Now
 }
 
 type entry struct {
-	value      string
-	expiresAt  time.Time
-	hasExpiry  bool // false means expiresAt is meaningless/ignored
+	value     string
+	expiresAt time.Time
+	hasExpiry bool // false means expiresAt is meaningless/ignored
 }
 
 // isExpired reports whether e has an expiry that has been reached or passed
@@ -32,12 +47,15 @@ func (s *Store) isExpired(e entry) bool {
 // missing or expired. Expiry is checked lazily here; an expired entry found
 // during Get is deleted from the map before reporting the miss.
 func (s *Store) Get(key string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	e, ok := s.data[key]
 	if !ok {
 		return "", false
 	}
 	if s.isExpired(e) {
-		delete(s.data, key)
+		s.remove(key)
 		return "", false
 	}
 	return e.value, true
@@ -48,6 +66,9 @@ func (s *Store) Get(key string) (string, bool) {
 // -1, which gets clamped to -1) means no expiration. Setting on an empty key
 // is a no-op. Returns 1 if the key was set, 0 otherwise.
 func (s *Store) Set(key, value string, ttlSeconds int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if key == "" {
 		return 0
 	}
@@ -57,12 +78,14 @@ func (s *Store) Set(key, value string, ttlSeconds int) int {
 
 	if ttlSeconds == -1 {
 		s.data[key] = entry{value: value, hasExpiry: false}
+		delete(s.expires, key)
 	} else {
 		s.data[key] = entry{
 			value:     value,
 			hasExpiry: true,
 			expiresAt: s.now().Add(time.Duration(ttlSeconds) * time.Second),
 		}
+		s.expires[key] = struct{}{}
 	}
 	return 1
 }
@@ -72,6 +95,9 @@ func (s *Store) Set(key, value string, ttlSeconds int) int {
 // (already treated as absent) all return 0. An expired entry found here is
 // still physically removed from the map as a cleanup side effect.
 func (s *Store) Del(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if key == "" {
 		return 0
 	}
@@ -80,9 +106,15 @@ func (s *Store) Del(key string) int {
 		return 0
 	}
 	if s.isExpired(e) {
-		delete(s.data, key)
+		s.remove(key)
 		return 0
 	}
-	delete(s.data, key)
+	s.remove(key)
 	return 1
+}
+
+// remove deletes key from data and from the TTL index. Callers hold s.mu.
+func (s *Store) remove(key string) {
+	delete(s.data, key)
+	delete(s.expires, key)
 }
