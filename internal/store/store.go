@@ -16,11 +16,18 @@ type Store struct {
 }
 
 func New() *Store {
-	return &Store{
-		data:    make(map[string]entry),
-		expires: make(map[string]struct{}),
-		now:     time.Now,
-	}
+	s := &Store{}
+	s.init()
+	return s
+}
+
+// init prepares a zero Store in place. It exists so a Store can live inside a
+// larger struct (the padded shards) without being copied, since a Store holds
+// a mutex.
+func (s *Store) init() {
+	s.data = make(map[string]entry)
+	s.expires = make(map[string]struct{})
+	s.now = time.Now
 }
 
 type entry struct {

@@ -117,3 +117,63 @@ statistically significant change at any SetParallelism (p=0.39 to 0.59).
 | 16 | 333.9 ns ± 12% | 324.4 ns ± 17% |
 
 The benchmark's SETs have no TTL, so this measures the delete-from-index path only.
+
+## Padded sharded store (REVISIT from 2b)
+
+### Stage A: store benchmark, padded shards in the real ShardedStore
+Each shard is followed by 128 bytes of padding (TestShardsDoNotShareCacheLines).
+Same benchmark and machine as the 2b run (GOMAXPROCS 4), benchstat n=6, after
+the Phase 3 TTL index was added.
+
+| SetParallelism | single | sharded (padded) | ratio |
+|---|---|---|---|
+| 1  | 238.9 ns ± 4%  | 204.8 ns ± 4% | 0.86 |
+| 4  | 345.1 ns ± 10% | 226.6 ns ± 3% | 0.66 |
+| 16 | 375.1 ns ± 8%  | 229.0 ns ± 4% | **0.61** |
+
+Ratio at p=16 is <= 0.80, so the store-level bar passes. The 2b scratch
+experiment measured 0.56; this confirms it in the real code. Stage B (through
+the server) decides whether the server switches.
+
+```
+goos: linux
+goarch: amd64
+pkg: gocache/internal/store
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz
+BenchmarkStores/single/p=1-4         	 4084326	       247.5 ns/op
+BenchmarkStores/single/p=1-4         	 4942084	       248.5 ns/op
+BenchmarkStores/single/p=1-4         	 5042211	       235.2 ns/op
+BenchmarkStores/single/p=1-4         	 5198784	       230.9 ns/op
+BenchmarkStores/single/p=1-4         	 4940281	       234.6 ns/op
+BenchmarkStores/single/p=1-4         	 5096346	       242.7 ns/op
+BenchmarkStores/single/p=4-4         	 4298415	       336.7 ns/op
+BenchmarkStores/single/p=4-4         	 3985606	       370.0 ns/op
+BenchmarkStores/single/p=4-4         	 3476280	       347.1 ns/op
+BenchmarkStores/single/p=4-4         	 3256792	       378.9 ns/op
+BenchmarkStores/single/p=4-4         	 3423308	       328.4 ns/op
+BenchmarkStores/single/p=4-4         	 4026621	       343.1 ns/op
+BenchmarkStores/single/p=16-4        	 3610593	       359.7 ns/op
+BenchmarkStores/single/p=16-4        	 3544411	       388.0 ns/op
+BenchmarkStores/single/p=16-4        	 3121321	       397.6 ns/op
+BenchmarkStores/single/p=16-4        	 2840007	       374.6 ns/op
+BenchmarkStores/single/p=16-4        	 3196141	       375.6 ns/op
+BenchmarkStores/single/p=16-4        	 3496218	       346.8 ns/op
+BenchmarkStores/sharded/p=1-4        	 5738446	       201.6 ns/op
+BenchmarkStores/sharded/p=1-4        	 5436223	       202.8 ns/op
+BenchmarkStores/sharded/p=1-4        	 5903890	       207.3 ns/op
+BenchmarkStores/sharded/p=1-4        	 5580903	       204.6 ns/op
+BenchmarkStores/sharded/p=1-4        	 5770194	       205.1 ns/op
+BenchmarkStores/sharded/p=1-4        	 6174429	       213.5 ns/op
+BenchmarkStores/sharded/p=4-4        	 5517302	       226.5 ns/op
+BenchmarkStores/sharded/p=4-4        	 5464461	       226.6 ns/op
+BenchmarkStores/sharded/p=4-4        	 5107779	       231.2 ns/op
+BenchmarkStores/sharded/p=4-4        	 5423779	       225.1 ns/op
+BenchmarkStores/sharded/p=4-4        	 5409297	       232.6 ns/op
+BenchmarkStores/sharded/p=4-4        	 5596782	       224.7 ns/op
+BenchmarkStores/sharded/p=16-4       	 4925194	       231.6 ns/op
+BenchmarkStores/sharded/p=16-4       	 5127900	       229.2 ns/op
+BenchmarkStores/sharded/p=16-4       	 5645264	       225.0 ns/op
+BenchmarkStores/sharded/p=16-4       	 5503180	       228.8 ns/op
+BenchmarkStores/sharded/p=16-4       	 5303980	       233.6 ns/op
+BenchmarkStores/sharded/p=16-4       	 5122470	       219.2 ns/op
+```

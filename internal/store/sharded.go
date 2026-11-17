@@ -6,7 +6,17 @@ package store
 // be benchmarked against the single-lock Store; the server does not use it.
 // Each shard is a full Store, so Phase 1 rules 1-10 hold by construction.
 type ShardedStore struct {
-	shards []*Store
+	shards []*Store      // shards[i] points into padded[i]
+	padded []paddedShard // keeps the shards allocated together, 128 bytes apart
+}
+
+// paddedShard puts 128 bytes after each Store, so no two shards' mutexes ever
+// share a 64-byte cache line, or the 128-byte pair many CPUs fetch together.
+// Without it, cores locking different shards still fight over the same cache
+// line (false sharing); see BENCHMARKS.md and SPEC.md 2b rule 13a.
+type paddedShard struct {
+	Store
+	_ [128]byte
 }
 
 // NewSharded returns a ShardedStore with n shards. n must be at least 1.
@@ -14,11 +24,13 @@ func NewSharded(n int) *ShardedStore {
 	if n < 1 {
 		panic("store: NewSharded needs at least 1 shard")
 	}
+	padded := make([]paddedShard, n)
 	shards := make([]*Store, n)
-	for i := range shards {
-		shards[i] = New()
+	for i := range padded {
+		padded[i].Store.init()
+		shards[i] = &padded[i].Store
 	}
-	return &ShardedStore{shards: shards}
+	return &ShardedStore{shards: shards, padded: padded}
 }
 
 // shardFor maps key to its shard: fnv32a(key) % numShards, so the same key
