@@ -172,6 +172,10 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 12. A missing snapshot file is normal (first run): log it and start empty.
 13. A corrupt snapshot file stops startup with an error naming the file, exit status 1. The server never starts empty over a corrupt file.
 
+### Save failures
+14. A failed periodic save is logged; the server keeps running and the next tick tries again.
+15. A failed save leaves the previous snapshot unchanged and no temporary file behind. The one exception is a failure to flush the directory after the rename: the new snapshot is then already in place, but the save still reports an error because it may not survive a crash.
+
 
 # Phase 6 spec
 
