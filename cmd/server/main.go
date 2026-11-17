@@ -77,8 +77,9 @@ func run(ctx context.Context, ln net.Listener, expiryInterval, snapshotInterval 
 	})
 
 	err = server.ServeConfig(ctx, ln, s, server.Config{
-		MaxClients:  server.DefaultMaxClients,
-		IdleTimeout: server.DefaultIdleTimeout,
+		MaxClients:   server.DefaultMaxClients,
+		IdleTimeout:  server.DefaultIdleTimeout,
+		WriteTimeout: server.DefaultWriteTimeout,
 	})
 	if !stopLog() { // the shutdown log ran (or is running): keep it before "stopped"
 		<-logged

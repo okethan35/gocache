@@ -41,8 +41,9 @@ func Serve(ln net.Listener, s *store.Store) error {
 
 // Connection limits (SPEC.md Phase 6).
 const (
-	DefaultMaxClients  = 1000            // rule 1
-	DefaultIdleTimeout = 5 * time.Minute // rule 4
+	DefaultMaxClients   = 1000             // rule 1
+	DefaultIdleTimeout  = 5 * time.Minute  // rule 4
+	DefaultWriteTimeout = 10 * time.Second // rule 7
 
 	// rejectWriteGrace is how long a rejected connection gets to receive
 	// rejectMessage (rule 2).
@@ -55,7 +56,7 @@ const (
 type Config struct {
 	MaxClients   int
 	IdleTimeout  time.Duration
-	WriteTimeout time.Duration // CHECKPOINT: ignored
+	WriteTimeout time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -64,6 +65,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.IdleTimeout == 0 {
 		c.IdleTimeout = DefaultIdleTimeout
+	}
+	if c.WriteTimeout == 0 {
+		c.WriteTimeout = DefaultWriteTimeout
 	}
 	return c
 }
@@ -87,7 +91,7 @@ func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
 // Limits (SPEC.md Phase 6): at most cfg.MaxClients connections are served at
 // once; others are sent rejectMessage and closed (rules 1-3). Each connection
 // must send a complete line within cfg.IdleTimeout of starting to wait for it
-// (rules 4-5).
+// (rules 4-5), and each reply must be written within cfg.WriteTimeout (rule 7).
 func ServeConfig(ctx context.Context, ln net.Listener, s *store.Store, cfg Config) error {
 	cfg = cfg.withDefaults()
 	tracker := &connTracker{open: make(map[net.Conn]struct{})}
@@ -146,7 +150,8 @@ func ServeConfig(ctx context.Context, ln net.Listener, s *store.Store, cfg Confi
 			// synchronously by cancel, before the watcher goroutine runs.
 			serveConn(conn, s,
 				func() bool { return ctx.Err() != nil },
-				func() { tracker.armIdle(conn, cfg.IdleTimeout) })
+				func() { tracker.armIdle(conn, cfg.IdleTimeout) },
+				func() { tracker.armWrite(conn, cfg.WriteTimeout) })
 		})
 	}
 }
@@ -164,11 +169,6 @@ type connTracker struct {
 	mu           sync.Mutex
 	open         map[net.Conn]struct{}
 	shuttingDown bool
-}
-
-// armWrite CHECKPOINT: stub with no shutdown guard.
-func (t *connTracker) armWrite(conn net.Conn, d time.Duration) {
-	conn.SetWriteDeadline(time.Now().Add(d))
 }
 
 // tryAdd registers conn unless max connections are already open, and reports
@@ -201,6 +201,18 @@ func (t *connTracker) armIdle(conn net.Conn, d time.Duration) {
 	conn.SetReadDeadline(time.Now().Add(d))
 }
 
+// armWrite gives conn d to write the next reply (SPEC.md Phase 6 rule 7). Like
+// armIdle, it holds the shutdown lock and does nothing once shutdown has
+// started, so it can never replace the shutdown write deadline (rule 8).
+func (t *connTracker) armWrite(conn net.Conn, d time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.shuttingDown {
+		return
+	}
+	conn.SetWriteDeadline(time.Now().Add(d))
+}
+
 func (t *connTracker) remove(conn net.Conn) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -231,14 +243,14 @@ func setShutdownDeadlines(conn net.Conn) {
 // connection (HandleConn's deferred Close still runs while unwinding) and the
 // server keeps running (SPEC.md 2b rule 16). Fatal runtime errors cannot be
 // recovered (rule 17).
-func serveConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead func()) {
+func serveConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead, beforeWrite func()) {
 	remote := conn.RemoteAddr()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("panic serving %v: %v\n%s", remote, r, debug.Stack())
 		}
 	}()
-	handleConn(conn, s, stopping, beforeRead)
+	handleConn(conn, s, stopping, beforeRead, beforeWrite)
 }
 
 // dispatch is what HandleConn calls to execute a line. It is a variable only
@@ -251,7 +263,7 @@ var dispatch = Dispatch
 // shutdown; ServeContext runs each connection through handleConn instead, in
 // its own goroutine. Neither starts goroutines itself.
 func HandleConn(conn net.Conn, s *store.Store) {
-	handleConn(conn, s, func() bool { return false }, func() {})
+	handleConn(conn, s, func() bool { return false }, func() {}, func() {})
 }
 
 // handleConn is HandleConn with a shutdown check: once stopping reports true,
@@ -260,7 +272,9 @@ func HandleConn(conn net.Conn, s *store.Store) {
 // already begun runs to completion and its response is written. beforeRead
 // runs before waiting for each line; ServeConfig uses it to restart the idle
 // timeout, so the timeout covers one whole line (SPEC.md Phase 6 rule 5).
-func handleConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead func()) {
+// beforeWrite runs before writing each reply; ServeConfig uses it to arm the
+// write timeout (rule 7).
+func handleConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead, beforeWrite func()) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
@@ -278,13 +292,16 @@ func handleConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead 
 		}
 
 		if tooLong {
+			beforeWrite()
 			if _, werr := io.WriteString(conn, "max line length exceeded\n"); werr != nil {
 				return
 			}
 			continue
 		}
 
-		if _, werr := io.WriteString(conn, dispatch(s, line)); werr != nil {
+		reply := dispatch(s, line)
+		beforeWrite()
+		if _, werr := io.WriteString(conn, reply); werr != nil {
 			return
 		}
 	}
