@@ -101,6 +101,17 @@ func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
 	}
 }
 
+// Config limits connections (SPEC.md Phase 6). CHECKPOINT: ignored by the stub.
+type Config struct {
+	MaxClients  int
+	IdleTimeout time.Duration
+}
+
+// ServeConfig CHECKPOINT: stub that ignores cfg.
+func ServeConfig(ctx context.Context, ln net.Listener, s *store.Store, cfg Config) error {
+	return ServeContext(ctx, ln, s)
+}
+
 // connTracker remembers open connections so shutdown can reach them.
 type connTracker struct {
 	mu           sync.Mutex
