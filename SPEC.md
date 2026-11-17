@@ -129,7 +129,8 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 ### Clients
 3. When shutdown starts, the server stops accepting new connections.
 4. Idle connections are closed straight away.
-5. A command whose line has been fully read when shutdown starts runs to completion and its response is written; then the connection closes. A partially received line is discarded (2a rule 22).
+5. A command already executing when shutdown starts runs to completion and its response is written; then the connection closes. Any other input is discarded without being executed, including complete lines the server has received but not yet started: a partially received line (2a rule 22), and further lines already sent on the same connection.
+5a. A response means the command ran. A command with no response may or may not have run (only the one executing at shutdown can be in that state) and is safe for the client to retry.
 6. Once shutdown starts, each connection has 1 second to finish writing; a client that does not read its response is closed after that.
 7. No goodbye message is sent; the connection just closes.
 

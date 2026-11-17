@@ -167,3 +167,52 @@ func TestShutdownInterruptsAcceptBackoff(t *testing.T) {
 		<-done
 	}
 }
+
+// SPEC.md Phase 4 rule 5: lines a client already sent but the server has not
+// started executing are discarded at shutdown, not executed.
+func TestShutdownDiscardsQueuedCommands(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var seen []string
+	// Swapped before the server starts and restored after it has returned.
+	dispatch = func(s *store.Store, line string) string {
+		mu.Lock()
+		seen = append(seen, line)
+		mu.Unlock()
+		if line == "SET slow $v$" {
+			close(entered)
+			<-release
+		}
+		return Dispatch(s, line)
+	}
+	t.Cleanup(func() { dispatch = Dispatch })
+
+	ln := listen(t)
+	cancel, wait := startServerContext(t, ln)
+
+	c, rc := dial(t, ln.Addr().String())
+	// One write, so the second line is normally already buffered by the server
+	// while the first one runs.
+	if _, err := c.Write([]byte("SET slow $v$\nSET queued $x$\n")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	<-entered
+	cancel()
+	close(release)
+
+	expectLine(t, rc, "1")
+	if _, err := rc.ReadString('\n'); !errors.Is(err, io.EOF) {
+		t.Errorf("expected connection to close with no reply for the queued line, got err=%v", err)
+	}
+	if err := wait(); err != nil {
+		t.Errorf("expected ServeContext to return nil, got %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, line := range seen {
+		if line == "SET queued $x$" {
+			t.Errorf("expected the queued line to be discarded, but it was executed")
+		}
+	}
+}
