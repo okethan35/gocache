@@ -177,3 +177,7 @@ BenchmarkStores/sharded/p=16-4       	 5503180	       228.8 ns/op
 BenchmarkStores/sharded/p=16-4       	 5303980	       233.6 ns/op
 BenchmarkStores/sharded/p=16-4       	 5122470	       219.2 ns/op
 ```
+
+### Stage B prediction (recorded before any run)
+Sharded/single ns/op ratio through the server: about **0.8**.
+Reasoning: network overhead dominates each request.
