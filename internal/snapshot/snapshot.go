@@ -92,6 +92,9 @@ func Read(r io.Reader) ([]store.Record, error) {
 		if hasExpiry > 1 {
 			return nil, fmt.Errorf("%w: entry %d: bad hasExpiry %d", ErrCorrupt, i, hasExpiry)
 		}
+		if hasExpiry == 0 && expiresAt != 0 {
+			return nil, fmt.Errorf("%w: entry %d: expiresAt %d with no expiry", ErrCorrupt, i, expiresAt)
+		}
 		rec := store.Record{Key: key, Value: val, HasExpiry: hasExpiry == 1}
 		if rec.HasExpiry {
 			rec.ExpiresAt = time.Unix(0, expiresAt)
