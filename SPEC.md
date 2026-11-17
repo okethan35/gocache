@@ -162,7 +162,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
    - count: uint64, number of entries
    - each entry: key length uint32, key bytes, value length uint32, value bytes, hasExpiry uint8 (0 or 1), expiresAt int64 Unix nanoseconds (0 when hasExpiry is 0)
    - checksum: uint32 CRC-32 (IEEE) of every byte before it
-9. Wrong magic, an unknown version, a checksum mismatch, a truncated file, or bytes left over after the entries make the file corrupt.
+9. Wrong magic, an unknown version, a checksum mismatch, a truncated file, bytes left over after the entries, a hasExpiry other than 0 or 1, or a nonzero expiresAt when hasExpiry is 0 make the file corrupt.
 
 ### Writing
 10. A snapshot is written to a temporary file in the same directory, flushed to disk, renamed over the old snapshot, and then the directory is flushed. A crash at any point leaves either the complete old snapshot or the complete new one.
@@ -171,3 +171,21 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 ### Loading problems
 12. A missing snapshot file is normal (first run): log it and start empty.
 13. A corrupt snapshot file stops startup with an error naming the file, exit status 1. The server never starts empty over a corrupt file.
+
+
+# Phase 6 spec
+
+## Connection limits
+
+### Client limit
+1. At most 1000 connections are served at once.
+2. A connection over the limit is accepted, sent "max clients reached\n", and closed. It never counts toward the limit, and handling it never stalls accepting other connections: it gets its own goroutine and 1 second to receive the message.
+3. A slot frees up when the connection holding it ends. Each rejection is logged with the remote address.
+
+### Idle timeout
+4. A connection that does not send a complete line within 5 minutes is closed without a message.
+5. The timeout restarts before each line, and covers the whole line: a client sending a line one byte at a time is closed once the whole line has taken longer than the timeout.
+6. Once shutdown has started (Phase 4), restarting the idle timeout never overrides the shutdown deadline.
+
+### API
+7. server.Config{MaxClients, IdleTimeout} and server.ServeConfig(ctx, ln, s, cfg). A zero field means the default (1000, 5 minutes). ServeContext and Serve use the defaults.

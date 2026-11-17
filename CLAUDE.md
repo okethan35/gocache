@@ -1,13 +1,14 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry), Phase 4 (graceful shutdown) and Phase 5 (persistence) are done. The next phase is not yet specified. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry), Phase 4 (graceful shutdown) and Phase 5 (persistence) are done. Phase 6 (connection limits) is in progress. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
 - Do not modify existing tests to make them pass. If a test seems wrong, flag it and ask - don't silently "fix" it
 - All new logic needs a corresponding test before it's considered done.
 - Time-dependent tests use the injectable `now func() time.Time` field on Store, never time.Sleep.
+- Network deadlines (idle timeout, shutdown) cannot use the fake clock, so those server tests run on the real clock with short timeouts. They still never call time.Sleep, and every wait is bounded by a deadline so a broken server fails the test instead of hanging it.
 - Every test must pass under both plain `go test` and `go test -race`. A concurrency test must still fail under plain `go test` when the protection it checks is missing.
 
 ## Code conventions
