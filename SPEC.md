@@ -116,3 +116,24 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 
 ### Visibility
 9. No metrics or logging for active expiry yet.
+
+
+# Phase 4 spec
+
+## Graceful shutdown
+
+### Trigger
+1. SIGINT or SIGTERM starts a graceful shutdown.
+2. A second SIGINT or SIGTERM during shutdown exits the process immediately.
+
+### Clients
+3. When shutdown starts, the server stops accepting new connections.
+4. Idle connections are closed straight away.
+5. A command whose line has been fully read when shutdown starts runs to completion and its response is written; then the connection closes. A partially received line is discarded (2a rule 22).
+6. Once shutdown starts, each connection has 1 second to finish writing; a client that does not read its response is closed after that.
+7. No goodbye message is sent; the connection just closes.
+
+### API and order
+8. server.ServeContext(ctx, ln, s) serves like Serve; cancelling ctx starts shutdown. It returns nil once every connection has ended. Serve(ln, s) is ServeContext with a context that is never cancelled.
+9. Shutdown order: signal, log "shutting down", stop accepting and drain connections, stop the expiry sweep, log "stopped", exit 0.
+10. A shutdown during an accept-error backoff does not wait for the backoff to finish.
