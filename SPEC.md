@@ -4,7 +4,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 
 1. GET on a missing key returns: (empty value, False) value plus "bad" flag, either nil or "" depending on value
 2. GET on an expired key returns: (empty value, False) value plus "bad" flag, either nil or "" depending on value
-3. Expiry checking strategy: lazy, get at GET time
+3. Expiry checking strategy: lazy, get at GET time, plus a periodic active sweep (see Phase 3)
 4. SET with ttl_seconds = 0 means: key expires immediately — a GET issued 
    at the exact same instant as SET, with zero real time elapsed, is 
    already treated as a miss.
@@ -93,3 +93,25 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 15. Closing the listener stops accepting new connections. The server stops once all open connections have ended. Other accept errors are logged and retried with backoff.
 16. A panic while serving a connection closes that connection only. The server and other connections keep running, and the store remains usable. The panic and its stack trace are logged.
 17. Fatal runtime errors (for example, concurrent map writes or out of memory) cannot be recovered and stop the server.
+
+
+# Phase 3 spec
+
+## Active expiry
+
+### Contract
+1. Active expiry never changes the result of any command. It only reclaims memory. Lazy expiry (Phase 1 rule 3) stays exactly as is, so correctness never depends on the sweep having run.
+2. Active expiry applies to the single-lock Store only. The sharded store is unchanged. No new wire commands.
+
+### Sweep
+3. Each tick runs up to 16 rounds. A round takes the store lock, examines up to 20 entries, deletes the expired ones, and releases the lock, so clients can run between rounds.
+4. Another round runs only if more than 25% of the entries examined in the current round were expired.
+5. Entries are sampled by ranging over the map and stopping after 20. Go starts map iteration at a random position, so this is a cheap approximation of random sampling, not a uniform one.
+
+### Lifecycle
+6. The sweep is started with Store.StartExpiry(interval), which returns a stop function. New() does not start it. stop() returns only after the sweep goroutine has exited.
+7. The server starts the sweep with an interval of 100ms.
+8. SPEC.md 2b rule 6 still applies: now is set before StartExpiry is called and is never reassigned while the sweep runs.
+
+### Visibility
+9. No metrics or logging for active expiry yet.
