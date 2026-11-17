@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"gocache/internal/protocol"
-	"gocache/internal/store"
 )
 
 // MaxLineLength is the longest command line (excluding the trailing
@@ -35,7 +34,7 @@ const shutdownWriteGrace = time.Second
 // (SPEC.md 2b rule 1), all sharing s. Once ln is closed it stops accepting,
 // waits for every open connection to end, and returns nil. It is ServeContext
 // with a context that is never cancelled (SPEC.md Phase 4 rule 8).
-func Serve(ln net.Listener, s *store.Store) error {
+func Serve(ln net.Listener, s KV) error {
 	return ServeContext(context.Background(), ln, s)
 }
 
@@ -73,7 +72,7 @@ func (c Config) withDefaults() Config {
 }
 
 // ServeContext is ServeConfig with the default limits (SPEC.md Phase 6 rule 9).
-func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
+func ServeContext(ctx context.Context, ln net.Listener, s KV) error {
 	return ServeConfig(ctx, ln, s, Config{})
 }
 
@@ -92,7 +91,7 @@ func ServeContext(ctx context.Context, ln net.Listener, s *store.Store) error {
 // once; others are sent rejectMessage and closed (rules 1-3). Each connection
 // must send a complete line within cfg.IdleTimeout of starting to wait for it
 // (rules 4-5), and each reply must be written within cfg.WriteTimeout (rule 7).
-func ServeConfig(ctx context.Context, ln net.Listener, s *store.Store, cfg Config) error {
+func ServeConfig(ctx context.Context, ln net.Listener, s KV, cfg Config) error {
 	cfg = cfg.withDefaults()
 	tracker := &connTracker{open: make(map[net.Conn]struct{})}
 
@@ -243,7 +242,7 @@ func setShutdownDeadlines(conn net.Conn) {
 // connection (HandleConn's deferred Close still runs while unwinding) and the
 // server keeps running (SPEC.md 2b rule 16). Fatal runtime errors cannot be
 // recovered (rule 17).
-func serveConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead, beforeWrite func()) {
+func serveConn(conn net.Conn, s KV, stopping func() bool, beforeRead, beforeWrite func()) {
 	remote := conn.RemoteAddr()
 	defer func() {
 		if r := recover(); r != nil {
@@ -251,6 +250,14 @@ func serveConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead, 
 		}
 	}()
 	handleConn(conn, s, stopping, beforeRead, beforeWrite)
+}
+
+// KV is the store API the server needs. Both *store.Store (single lock) and
+// *store.ShardedStore satisfy it.
+type KV interface {
+	Get(key string) (string, bool)
+	Set(key, value string, ttlSeconds int) int
+	Del(key string) int
 }
 
 // dispatch is what HandleConn calls to execute a line. It is a variable only
@@ -262,7 +269,7 @@ var dispatch = Dispatch
 // disconnects, a read is interrupted, or a write fails. It never stops for a
 // shutdown; ServeContext runs each connection through handleConn instead, in
 // its own goroutine. Neither starts goroutines itself.
-func HandleConn(conn net.Conn, s *store.Store) {
+func HandleConn(conn net.Conn, s KV) {
 	handleConn(conn, s, func() bool { return false }, func() {}, func() {})
 }
 
@@ -274,7 +281,7 @@ func HandleConn(conn net.Conn, s *store.Store) {
 // timeout, so the timeout covers one whole line (SPEC.md Phase 6 rule 5).
 // beforeWrite runs before writing each reply; ServeConfig uses it to arm the
 // write timeout (rule 7).
-func handleConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead, beforeWrite func()) {
+func handleConn(conn net.Conn, s KV, stopping func() bool, beforeRead, beforeWrite func()) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
@@ -310,7 +317,7 @@ func handleConn(conn net.Conn, s *store.Store, stopping func() bool, beforeRead,
 // Dispatch parses a single command line and executes it against s,
 // returning the exact wire-format response (including trailing "\n") per
 // SPEC.md's Responses section.
-func Dispatch(s *store.Store, line string) string {
+func Dispatch(s KV, line string) string {
 	cmd, err := protocol.ParseCommand(line)
 	if err != nil {
 		return "invalid command\n"

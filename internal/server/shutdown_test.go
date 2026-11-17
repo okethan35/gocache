@@ -84,7 +84,7 @@ func TestShutdownFinishesRunningCommand(t *testing.T) {
 	release := make(chan struct{})
 	// Swapped before the server starts and restored after it has returned,
 	// so no connection goroutine reads dispatch while it changes.
-	dispatch = func(s *store.Store, line string) string {
+	dispatch = func(s KV, line string) string {
 		if line == "SET slow $v$" {
 			close(entered)
 			<-release
@@ -176,7 +176,7 @@ func TestShutdownDiscardsQueuedCommands(t *testing.T) {
 	var mu sync.Mutex
 	var seen []string
 	// Swapped before the server starts and restored after it has returned.
-	dispatch = func(s *store.Store, line string) string {
+	dispatch = func(s KV, line string) string {
 		mu.Lock()
 		seen = append(seen, line)
 		mu.Unlock()

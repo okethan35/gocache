@@ -144,7 +144,7 @@ func TestShutdownBeatsIdleTimeout(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	// Swapped before the server starts and restored after it has returned.
-	dispatch = func(s *store.Store, line string) string {
+	dispatch = func(s KV, line string) string {
 		if line == "SET slow $v$" {
 			close(entered)
 			<-release

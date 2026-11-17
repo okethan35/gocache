@@ -5,8 +5,6 @@ import (
 	"errors"
 	"io"
 	"testing"
-
-	"gocache/internal/store"
 )
 
 // SPEC.md 2b rule 16: a panic while serving one connection closes only that
@@ -14,7 +12,7 @@ import (
 func TestServePanicClosesOnlyThatConnection(t *testing.T) {
 	// Swap dispatch before the server starts, so no goroutine reads it
 	// while it changes. "BOOM" panics; everything else behaves normally.
-	dispatch = func(s *store.Store, line string) string {
+	dispatch = func(s KV, line string) string {
 		if line == "BOOM" {
 			panic("injected test panic")
 		}
