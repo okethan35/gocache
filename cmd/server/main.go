@@ -42,45 +42,33 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", addr, err)
 	}
-	if err := runPersistent(ctx, ln, expiryInterval, snapshotInterval, snapshotPath); err != nil {
-		log.Fatalf("server stopped: %v", err)
+	if err := run(ctx, ln, expiryInterval, snapshotInterval, snapshotPath); err != nil {
+		log.Fatal(err) // the error says what failed (e.g. loading or saving the snapshot)
 	}
 }
 
-// run is runPersistent with persistence disabled (an empty path, SPEC.md
-// Phase 5 rule 4).
-func run(ctx context.Context, ln net.Listener, interval time.Duration) error {
-	return runPersistent(ctx, ln, interval, 0, "")
-}
-
-// runPersistent loads the snapshot at path (SPEC.md Phase 5 rules 3, 12, 13),
+// run loads the snapshot at path (SPEC.md Phase 5 rules 3, 12, 13),
 // then serves on ln with the active-expiry sweep and periodic snapshots
 // running, until ctx is cancelled. Then it shuts down in order: log "shutting
 // down", stop accepting and drain connections, stop the sweep, stop periodic
 // snapshots, save a final snapshot, log "stopped" (Phase 4 rule 9, Phase 5
 // rule 2). A failed final save is returned, so main exits with status 1.
-// An empty path disables persistence.
-func runPersistent(ctx context.Context, ln net.Listener, expiryInterval, snapshotInterval time.Duration, path string) error {
+func run(ctx context.Context, ln net.Listener, expiryInterval, snapshotInterval time.Duration, path string) error {
 	s := store.New()
-	if path != "" {
-		recs, err := snapshot.LoadFile(path)
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			log.Printf("no snapshot at %s, starting empty", path)
-		case err != nil:
-			return fmt.Errorf("loading %w", err) // names the file
-		default:
-			s.Import(recs)
-			log.Printf("loaded %d entries from %s", len(recs), path)
-		}
+	recs, err := snapshot.LoadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		log.Printf("no snapshot at %s, starting empty", path)
+	case err != nil:
+		return fmt.Errorf("loading %w", err) // names the file
+	default:
+		s.Import(recs)
+		log.Printf("loaded %d entries from %s", len(recs), path)
 	}
 
 	log.Printf("gocache listening on %s", ln.Addr())
 	stopExpiry := s.StartExpiry(expiryInterval)
-	stopSnapshots := func() {}
-	if path != "" {
-		stopSnapshots = snapshot.Start(s, path, snapshotInterval)
-	}
+	stopSnapshots := snapshot.Start(s, path, snapshotInterval)
 
 	logged := make(chan struct{})
 	stopLog := context.AfterFunc(ctx, func() {
@@ -88,22 +76,20 @@ func runPersistent(ctx context.Context, ln net.Listener, expiryInterval, snapsho
 		close(logged)
 	})
 
-	err := server.ServeContext(ctx, ln, s)
+	err = server.ServeContext(ctx, ln, s)
 	if !stopLog() { // the shutdown log ran (or is running): keep it before "stopped"
 		<-logged
 	}
 	stopExpiry()
 	stopSnapshots()
-	if path != "" {
-		recs := s.Export()
-		if serr := snapshot.SaveFile(path, recs); serr != nil {
-			log.Printf("final snapshot failed: %v", serr)
-			if err == nil {
-				err = serr
-			}
-		} else {
-			log.Printf("saved %d entries to %s", len(recs), path)
+	recs = s.Export()
+	if serr := snapshot.SaveFile(path, recs); serr != nil {
+		log.Printf("final snapshot failed: %v", serr)
+		if err == nil {
+			err = serr
 		}
+	} else {
+		log.Printf("saved %d entries to %s", len(recs), path)
 	}
 	log.Print("stopped")
 	return err

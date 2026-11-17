@@ -148,7 +148,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 1. Persistence is by snapshot: the whole store is written to one file. Writes made after the last snapshot are lost on a crash.
 2. A snapshot is taken every 60 seconds while running, and once more during graceful shutdown after connections have drained (after Phase 4 rule 9's drain and expiry-sweep stop, before "stopped"). If that final save fails, the error is logged and the process exits with status 1.
 3. At startup the snapshot is loaded into the empty store before any connection is served.
-4. The snapshot file is dump.gocache in the working directory. An empty path disables persistence (no load, no snapshots).
+4. The snapshot file is dump.gocache in the working directory. Persistence is always on.
 
 ### Contents
 5. Each live entry is saved with its key, value, and expiry. A TTL is saved as an absolute wall-clock time (Unix nanoseconds). Known limitation: if the system clock jumps between save and load, expiries shift with it.

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// startPersistent runs runPersistent on a fresh local listener and returns a
+// startPersistent runs run on a fresh local listener and returns a
 // connected client plus a stop func that cancels and returns run's error.
 func startPersistent(t *testing.T, path string) (net.Conn, *bufio.Reader, func() error) {
 	t.Helper()
@@ -22,7 +22,7 @@ func startPersistent(t *testing.T, path string) (net.Conn, *bufio.Reader, func()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- runPersistent(ctx, ln, time.Hour, time.Hour, path) }()
+	go func() { done <- run(ctx, ln, time.Hour, time.Hour, path) }()
 
 	c, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -36,7 +36,7 @@ func startPersistent(t *testing.T, path string) (net.Conn, *bufio.Reader, func()
 		case err := <-done:
 			return err
 		case <-time.After(2 * time.Second):
-			t.Fatalf("runPersistent did not return within 2s of cancel")
+			t.Fatalf("run did not return within 2s of cancel")
 			return nil
 		}
 	}
@@ -89,7 +89,7 @@ func TestCorruptSnapshotStopsStartup(t *testing.T) {
 	t.Cleanup(func() { ln.Close() })
 
 	done := make(chan error, 1)
-	go func() { done <- runPersistent(context.Background(), ln, time.Hour, time.Hour, path) }()
+	go func() { done <- run(context.Background(), ln, time.Hour, time.Hour, path) }()
 	select {
 	case err := <-done:
 		if err == nil {
@@ -99,6 +99,6 @@ func TestCorruptSnapshotStopsStartup(t *testing.T) {
 			t.Errorf("expected the error to name %s, got %q", path, err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatalf("runPersistent kept running with a corrupt snapshot")
+		t.Fatalf("run kept running with a corrupt snapshot")
 	}
 }

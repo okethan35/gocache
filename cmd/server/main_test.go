@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -22,7 +23,8 @@ func TestRunStopsOnCancel(t *testing.T) {
 	t.Cleanup(func() { ln.Close() })
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- run(ctx, ln, time.Hour) }()
+	path := filepath.Join(t.TempDir(), "dump.gocache")
+	go func() { done <- run(ctx, ln, time.Hour, time.Hour, path) }()
 
 	c, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {

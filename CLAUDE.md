@@ -1,7 +1,7 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry) and Phase 4 (graceful shutdown) are done. Phase 5 (persistence) is in progress. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry), Phase 4 (graceful shutdown) and Phase 5 (persistence) are done. The next phase is not yet specified. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
@@ -40,7 +40,18 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - server.ServeContext(ctx, ln, s): cancelling ctx closes the listener, sets every open connection's read deadline to now and write deadline to now+1s, and returns nil once all connections end. Serve(ln, s) is ServeContext with a never-cancelled context, so its tests are unchanged.
 - Shutdown starts the instant ctx is cancelled: connections check ctx.Err() before executing each line, so lines already received but not started are discarded unexecuted. Only the command already executing finishes and gets its reply.
 - Client contract: a reply means the command ran; no reply means it may or may not have run and is safe to retry.
-- main's body lives in run(ctx, ln, interval) so it can be tested by cancelling ctx: log "shutting down", drain, stop the expiry sweep, log "stopped", exit 0.
+- main's body lives in run(ctx, ...) so it can be tested by cancelling ctx: log "shutting down", drain, stop the expiry sweep, log "stopped", exit 0. (Phase 5 added snapshot steps; see below.)
+
+## Phase 5 decisions (done)
+- Persistence is by snapshot to dump.gocache (always on): loaded at startup before serving, saved every 60s and once more at shutdown after draining and stopping the sweep. A failed final save exits 1.
+- Store.Export copies live entries under the lock (expired ones skipped); the file is written with the lock released. Store.Import drops entries expired by load time and keeps the TTL index in sync.
+- internal/snapshot owns the binary format (SPEC.md Phase 5 rule 8: magic, version, count, entries, CRC-32). Read verifies the checksum before trusting any field and bounds-checks every read, so damaged input returns an error, never a panic. FuzzRead (run with -fuzz) checks this.
+- SaveFile is atomic: temp file in the same directory, fsync, rename, fsync the directory.
+- Missing snapshot: start empty. Corrupt snapshot: refuse to start, naming the file.
+- TTLs are stored as absolute wall-clock Unix nanoseconds; a clock jump between save and load shifts expiries (known limitation).
+- run(ctx, ln, expiryInterval, snapshotInterval, path) is main's testable body; tests pass a t.TempDir path.
 
 ## Carried into the next phase
 - REVISIT: padded sharded store (BENCHMARKS.md) vs the single lock for the server.
+- Untested: a failing final or periodic save, and crash-durability of the directory fsync (need a fault-injecting filesystem).
+- Snapshot peak memory is about 3x the store (data, Export copy, encoded file in memory); streaming Write would remove the third copy.
