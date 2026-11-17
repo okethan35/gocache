@@ -1,7 +1,7 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) are done. Phase 3 (active expiry) is in progress. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) and Phase 3 (active expiry) are done. The next phase is not yet specified. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
@@ -26,6 +26,14 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - Panic recovery: a deferred recover in the goroutine Serve starts per connection; a panic closes only that connection and is logged with its stack trace. Fatal runtime errors are not recoverable.
 - Serve waits for all open connections to end before returning after the listener closes, so nothing it started outlives it. Full graceful shutdown (closing open connections) is out of scope for 2b.
 
+## Phase 3 decisions (done)
+- Active expiry never changes command results; lazy expiry stays the source of correctness, the sweep only reclaims memory.
+- Sweep: every 100ms (server), up to 16 rounds per tick, each round locks, samples up to 20 keys, deletes expired ones, unlocks. Another round runs only if >25% of the round was expired.
+- The sweep samples only TTL keys, from an `expires` index on Store kept in sync by Set and by a single remove(key) helper used for every deletion. Sampling ranges over the index (random start, not uniform).
+- StartExpiry(interval) returns a stop func that waits for the goroutine to exit; New() does not start it; a non-positive interval panics.
+- Tests drive the sweep loop through an injected tick channel, never a real ticker or sleep.
+
 ## Carried into the next phase
 - REVISIT: concurrency tests rely on plain `go test`. The panic-test data race in 2b was caught only by `-race`, which argues for also running `-race`.
 - REVISIT: padded sharded store (BENCHMARKS.md) vs the single lock for the server.
+- REVISIT: main never calls the expiry stop function or closes the listener, since there is no shutdown path yet.
