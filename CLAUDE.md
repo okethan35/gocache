@@ -1,7 +1,7 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry), Phase 4 (graceful shutdown) and Phase 5 (persistence) are done. Phase 6 (connection limits) is in progress. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry), Phase 4 (graceful shutdown) Phase 5 (persistence) and Phase 6 (connection limits) are done. The next phase is not yet specified. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
@@ -51,6 +51,14 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - Missing snapshot: start empty. Corrupt snapshot: refuse to start, naming the file.
 - TTLs are stored as absolute wall-clock Unix nanoseconds; a clock jump between save and load shifts expiries (known limitation).
 - run(ctx, ln, expiryInterval, snapshotInterval, path) is main's testable body; tests pass a t.TempDir path.
+
+## Phase 6 decisions (done)
+- server.ServeConfig(ctx, ln, s, Config{MaxClients, IdleTimeout, WriteTimeout}); zero fields mean the defaults (1000, 5m, 10s). ServeContext and Serve use the defaults.
+- Over the limit: accept, send "max clients reached\n" with a 1s write deadline in its own goroutine (tracked, so Serve waits for it), close, log. Rejected connections never count.
+- Idle timeout: the read deadline is reset before each line, so a whole line must arrive in time (stops slow-loris drips). Closed without a message.
+- Write timeout: the write deadline is set before each reply (after dispatch, so it covers only the write). A client that never reads is closed, freeing its slot.
+- Shutdown always wins: armIdle and armWrite take the tracker lock and do nothing once shutdown has started. The shutdown watcher applies shutdown deadlines before closing the listener.
+- Network-deadline tests run on the real clock with short timeouts and bounded waits, never time.Sleep (see Testing philosophy).
 
 ## Carried into the next phase
 - REVISIT: padded sharded store (BENCHMARKS.md) vs the single lock for the server.
