@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"syscall"
 	"testing"
 	"time"
 
@@ -121,8 +122,11 @@ func TestSlowLineIsClosed(t *testing.T) {
 	for {
 		select {
 		case err := <-closed:
-			if !errors.Is(err, io.EOF) {
-				t.Errorf("expected the slow client to be closed (EOF), got err=%v", err)
+			// The server closes while holding unread bytes (the drip), so the
+			// OS may report the close as a reset instead of EOF. Both mean
+			// the server closed the connection.
+			if !errors.Is(err, io.EOF) && !errors.Is(err, syscall.ECONNRESET) {
+				t.Errorf("expected the slow client to be closed (EOF or reset), got err=%v", err)
 			}
 			return
 		case <-ticker.C:
