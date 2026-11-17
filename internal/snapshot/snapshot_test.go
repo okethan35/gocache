@@ -187,3 +187,26 @@ func TestSnapshotLoopSavesOnTick(t *testing.T) {
 	}
 	sameRecords(t, got, []store.Record{{Key: "foo", Value: "bar"}})
 }
+
+// SPEC.md Phase 5 rule 9: an entry with hasExpiry 0 must have expiresAt 0,
+// and hasExpiry must be 0 or 1.
+func TestReadRejectsBadExpiryFields(t *testing.T) {
+	good := encode(t, []store.Record{{Key: "k", Value: "v"}})
+	// Entry layout after the 20-byte header: keyLen(4) 'k' valLen(4) 'v' hasExpiry(1) expiresAt(8).
+	const hasExpiryAt = 20 + 4 + 1 + 4 + 1
+	const expiresAtAt = hasExpiryAt + 1
+
+	nonzero := append([]byte{}, good...)
+	binary.LittleEndian.PutUint64(nonzero[expiresAtAt:], 99)
+	nonzero = withChecksum(nonzero)
+
+	badFlag := append([]byte{}, good...)
+	badFlag[hasExpiryAt] = 2
+	badFlag = withChecksum(badFlag)
+
+	for name, b := range map[string][]byte{"nonzero expiresAt with no expiry": nonzero, "hasExpiry 2": badFlag} {
+		if _, err := Read(bytes.NewReader(b)); err == nil {
+			t.Errorf("%s: expected an error, got nil", name)
+		}
+	}
+}
