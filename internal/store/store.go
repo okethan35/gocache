@@ -6,7 +6,9 @@ import (
 	"time"
 )
 
-// MaxTTLSeconds CHECKPOINT: defined but not enforced yet.
+// MaxTTLSeconds is the largest TTL Set accepts: 100 years (SPEC.md Phase 1
+// rule 11). It keeps now+TTL far inside the range of time.Duration (about 292
+// years) and of the snapshot's Unix-nanosecond expiry (until year 2262).
 const MaxTTLSeconds = 3155760000
 
 type Store struct {
@@ -74,6 +76,9 @@ func (s *Store) Set(key, value string, ttlSeconds int) int {
 
 	if key == "" {
 		return 0
+	}
+	if ttlSeconds > MaxTTLSeconds {
+		return 0 // would overflow time.Duration or the snapshot format
 	}
 	if ttlSeconds < -1 {
 		ttlSeconds = -1
