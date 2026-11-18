@@ -13,6 +13,12 @@ type Command struct {
 	TTL   int    // only meaningful for SET, -1 if not provided
 }
 
+// MaxTTLSeconds is the largest TTL a SET may ask for: 100 years (SPEC.md 2a
+// rule 16a). Anything larger is an invalid command. It must equal
+// store.MaxTTLSeconds; internal/protocol cannot import the store, so a test in
+// internal/server keeps the two in step.
+const MaxTTLSeconds = 3155760000
+
 var ErrInvalidCommand = errors.New("invalid command")
 
 // ParseCommand parses a single wire-protocol line (without the trailing
@@ -80,6 +86,9 @@ func parseSet(rest string) (Command, error) {
 		}
 		n, err := strconv.Atoi(fields[0])
 		if err != nil {
+			return Command{}, ErrInvalidCommand
+		}
+		if n > MaxTTLSeconds {
 			return Command{}, ErrInvalidCommand
 		}
 		ttl = n

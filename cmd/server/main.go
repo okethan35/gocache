@@ -66,6 +66,14 @@ func run(ctx context.Context, ln net.Listener, expiryInterval, snapshotInterval 
 		log.Printf("loaded %d entries from %s", len(recs), path)
 	}
 
+	// A crash during a save can leave a temp file behind (SPEC.md Phase 5
+	// rule 16). Nothing is saving yet, so any match is a leftover.
+	if n, err := snapshot.CleanTemp(path); err != nil {
+		log.Printf("removing leftover snapshot temp files: %v", err)
+	} else if n > 0 {
+		log.Printf("removed %d leftover snapshot temp file(s)", n)
+	}
+
 	log.Printf("gocache listening on %s", ln.Addr())
 	stopExpiry := s.StartExpiry(expiryInterval)
 	stopSnapshots := snapshot.Start(s, path, snapshotInterval)
@@ -76,12 +84,8 @@ func run(ctx context.Context, ln net.Listener, expiryInterval, snapshotInterval 
 		close(logged)
 	})
 
-	err = server.ServeConfig(ctx, ln, s, server.Config{
-		MaxClients:   server.DefaultMaxClients,
-		IdleTimeout:  server.DefaultIdleTimeout,
-		WriteTimeout: server.DefaultWriteTimeout,
-	})
-	if !stopLog() { // the shutdown log ran (or is running): keep it before "stopped"
+	err = server.ServeConfig(ctx, ln, s, server.Config{}) // the Phase 6 defaults
+	if !stopLog() {                                       // the shutdown log ran (or is running): keep it before "stopped"
 		<-logged
 	}
 	stopExpiry()
