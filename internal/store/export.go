@@ -32,12 +32,16 @@ func (s *Store) Export() []Record {
 
 // Import adds recs to the store, overwriting entries with the same key, and
 // keeps the TTL index in sync (SPEC.md Phase 5 rule 7). Records that have
-// expired by now are dropped (rule 6).
+// expired by now are dropped (rule 6), and records with an empty key are
+// skipped (rule 7).
 func (s *Store) Import(recs []Record) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, r := range recs {
+		if r.Key == "" {
+			continue // the store never holds an empty key (Phase 1 rule 9)
+		}
 		e := entry{value: r.Value, hasExpiry: r.HasExpiry, expiresAt: r.ExpiresAt}
 		if s.isExpired(e) {
 			continue

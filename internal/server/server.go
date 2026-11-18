@@ -58,6 +58,20 @@ type Config struct {
 	WriteTimeout time.Duration
 }
 
+// validate rejects negative fields, which would otherwise reject every client
+// or expire every deadline at once (SPEC.md Phase 6 rule 9).
+func (c Config) validate() error {
+	switch {
+	case c.MaxClients < 0:
+		return fmt.Errorf("server: negative MaxClients %d", c.MaxClients)
+	case c.IdleTimeout < 0:
+		return fmt.Errorf("server: negative IdleTimeout %v", c.IdleTimeout)
+	case c.WriteTimeout < 0:
+		return fmt.Errorf("server: negative WriteTimeout %v", c.WriteTimeout)
+	}
+	return nil
+}
+
 func (c Config) withDefaults() Config {
 	if c.MaxClients == 0 {
 		c.MaxClients = DefaultMaxClients
@@ -92,6 +106,9 @@ func ServeContext(ctx context.Context, ln net.Listener, s KV) error {
 // must send a complete line within cfg.IdleTimeout of starting to wait for it
 // (rules 4-5), and each reply must be written within cfg.WriteTimeout (rule 7).
 func ServeConfig(ctx context.Context, ln net.Listener, s KV, cfg Config) error {
+	if err := cfg.validate(); err != nil {
+		return err
+	}
 	cfg = cfg.withDefaults()
 	tracker := &connTracker{open: make(map[net.Conn]struct{})}
 

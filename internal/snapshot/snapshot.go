@@ -30,6 +30,10 @@ const (
 	checksumSize = 4
 )
 
+// tempPattern names the temporary files SaveFile writes (os.CreateTemp
+// replaces the "*"); CleanTemp removes leftovers matching it.
+const tempPattern = ".gocache-*.tmp"
+
 // ErrCorrupt is returned (wrapped) for any damaged or unrecognised file
 // (SPEC.md Phase 5 rule 9).
 var ErrCorrupt = errors.New("corrupt")
@@ -96,6 +100,9 @@ func Read(r io.Reader) ([]store.Record, error) {
 		if hasExpiry == 0 && expiresAt != 0 {
 			return nil, fmt.Errorf("%w: entry %d: expiresAt %d with no expiry", ErrCorrupt, i, expiresAt)
 		}
+		if key == "" {
+			return nil, fmt.Errorf("%w: entry %d: empty key", ErrCorrupt, i)
+		}
 		rec := store.Record{Key: key, Value: val, HasExpiry: hasExpiry == 1}
 		if rec.HasExpiry {
 			rec.ExpiresAt = time.Unix(0, expiresAt)
@@ -161,7 +168,7 @@ func SaveFile(path string, recs []store.Record) error {
 
 func saveFile(fsys fileSystem, path string, recs []store.Record) (err error) {
 	dir := filepath.Dir(path)
-	tmp, err := fsys.CreateTemp(dir, ".gocache-*.tmp")
+	tmp, err := fsys.CreateTemp(dir, tempPattern)
 	if err != nil {
 		return fmt.Errorf("snapshot %s: %w", path, err)
 	}
@@ -223,8 +230,13 @@ func (osFS) Remove(name string) error                         { return os.Remove
 
 func (osFS) SyncDir(dir string) error { return syncDirFor(runtime.GOOS, dir) }
 
-// syncDirFor CHECKPOINT: ignores goos.
+// syncDirFor flushes dir to disk, except on Windows, which cannot flush a
+// directory handle (SPEC.md Phase 5 rule 10). goos is a parameter so the
+// Windows branch can be tested on any platform.
 func syncDirFor(goos, dir string) error {
+	if goos == "windows" {
+		return nil
+	}
 	d, err := os.Open(dir)
 	if err != nil {
 		return err
@@ -294,5 +306,26 @@ func startLoopWith(s *store.Store, path string, ticks <-chan time.Time, save fun
 	}
 }
 
-// CleanTemp CHECKPOINT: stub.
-func CleanTemp(path string) (int, error) { return 0, nil }
+// CleanTemp removes leftover temporary snapshot files (".gocache-*.tmp", the
+// pattern SaveFile uses) from path's directory and returns how many it removed
+// (SPEC.md Phase 5 rule 16). Such files exist only if a save was interrupted
+// by a crash. Call it at startup, before any save can be in progress; it
+// assumes no other server shares the directory.
+func CleanTemp(path string) (int, error) {
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), tempPattern))
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	var firstErr error
+	for _, m := range matches {
+		if err := os.Remove(m); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removed++
+	}
+	return removed, firstErr
+}
