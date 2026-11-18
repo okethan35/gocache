@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// MaxTTLSeconds CHECKPOINT: defined but not enforced yet.
+const MaxTTLSeconds = 3155760000
+
 type Store struct {
 	mu   sync.Mutex // guards data; held for the whole body of Get/Set/Del
 	data map[string]entry

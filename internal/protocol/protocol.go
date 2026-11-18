@@ -13,6 +13,9 @@ type Command struct {
 	TTL   int    // only meaningful for SET, -1 if not provided
 }
 
+// MaxTTLSeconds CHECKPOINT: defined but not enforced yet.
+const MaxTTLSeconds = 3155760000
+
 var ErrInvalidCommand = errors.New("invalid command")
 
 // ParseCommand parses a single wire-protocol line (without the trailing
