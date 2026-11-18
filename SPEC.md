@@ -155,7 +155,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 ### Contents
 5. Each live entry is saved with its key, value, and expiry. A TTL is saved as an absolute wall-clock time (Unix nanoseconds). Known limitation: if the system clock jumps between save and load, expiries shift with it.
 6. Entries already expired when the snapshot is taken are not saved. Entries that have expired by the time a snapshot is loaded are dropped.
-7. Loading adds entries to the store and keeps the TTL index (Phase 3 rule 5) in sync.
+7. Loading adds entries to the store and keeps the TTL index (Phase 3 rule 5) in sync. An entry with an empty key is never loaded (Phase 1 rule 9).
 
 ### File format
 8. All integers little-endian:
@@ -164,10 +164,10 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
    - count: uint64, number of entries
    - each entry: key length uint32, key bytes, value length uint32, value bytes, hasExpiry uint8 (0 or 1), expiresAt int64 Unix nanoseconds (0 when hasExpiry is 0)
    - checksum: uint32 CRC-32 (IEEE) of every byte before it
-9. Wrong magic, an unknown version, a checksum mismatch, a truncated file, bytes left over after the entries, a hasExpiry other than 0 or 1, or a nonzero expiresAt when hasExpiry is 0 make the file corrupt.
+9. Wrong magic, an unknown version, a checksum mismatch, a truncated file, bytes left over after the entries, a hasExpiry other than 0 or 1, a nonzero expiresAt when hasExpiry is 0, or an empty key make the file corrupt.
 
 ### Writing
-10. A snapshot is written to a temporary file in the same directory, flushed to disk, renamed over the old snapshot, and then the directory is flushed. A crash at any point leaves either the complete old snapshot or the complete new one.
+10. A snapshot is written to a temporary file in the same directory, flushed to disk, renamed over the old snapshot, and then the directory is flushed. A crash at any point leaves either the complete old snapshot or the complete new one. On Windows, which cannot flush a directory, that last step is skipped.
 11. Taking a snapshot holds the store lock only while copying the entries; the file is written with the lock released. Each snapshot reflects the store at one instant.
 
 ### Loading problems
@@ -177,6 +177,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 ### Save failures
 14. A failed periodic save is logged; the server keeps running and the next tick tries again.
 15. A failed save leaves the previous snapshot unchanged and no temporary file behind. The one exception is a failure to flush the directory after the rename: the new snapshot is then already in place, but the save still reports an error because it may not survive a crash.
+16. At startup, before the first save, leftover temporary snapshot files (".gocache-*.tmp" in the snapshot's directory, left by a crash during a save) are removed and the count is logged. Only one server may use a snapshot directory at a time.
 
 
 # Phase 6 spec
@@ -198,4 +199,4 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 8. Once shutdown has started, setting the write timeout never overrides the shutdown write deadline (Phase 4 rule 6).
 
 ### API
-9. server.Config{MaxClients, IdleTimeout, WriteTimeout} and server.ServeConfig(ctx, ln, s, cfg). A zero field means the default (1000, 5 minutes, 10 seconds). ServeContext and Serve use the defaults.
+9. server.Config{MaxClients, IdleTimeout, WriteTimeout} and server.ServeConfig(ctx, ln, s, cfg). A zero field means the default (1000, 5 minutes, 10 seconds). ServeContext and Serve use the defaults. A negative field is an error: ServeConfig returns it without serving.
