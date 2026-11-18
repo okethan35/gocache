@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -220,7 +221,10 @@ func (osFS) CreateTemp(dir, pattern string) (tempFile, error) { return os.Create
 func (osFS) Rename(oldpath, newpath string) error             { return os.Rename(oldpath, newpath) }
 func (osFS) Remove(name string) error                         { return os.Remove(name) }
 
-func (osFS) SyncDir(dir string) error {
+func (osFS) SyncDir(dir string) error { return syncDirFor(runtime.GOOS, dir) }
+
+// syncDirFor CHECKPOINT: ignores goos.
+func syncDirFor(goos, dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
 		return err
@@ -289,3 +293,6 @@ func startLoopWith(s *store.Store, path string, ticks <-chan time.Time, save fun
 		<-exited
 	}
 }
+
+// CleanTemp CHECKPOINT: stub.
+func CleanTemp(path string) (int, error) { return 0, nil }
