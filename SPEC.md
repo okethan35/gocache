@@ -14,6 +14,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 8. DEL on a missing key: error, or silently do nothing? return 0 (number of deleted keys)
 9. SET or DEL on empty key: return 0 (number of keys updated)
 10. SET on valid key: return 1
+11. SET with ttl_seconds above 3,155,760,000 (100 years): stores nothing and returns 0. The limit keeps every expiry representable in memory (time.Duration) and in the snapshot file (Unix nanoseconds).
 
 
 # Phase 2 spec
@@ -44,6 +45,7 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 14. Command with no key: invalid command\n
 15. SET with no value: invalid command\n
 16. SET with non-integer ttls return: invalid command\n
+16a. SET with a ttl above 3,155,760,000 seconds (100 years) returns: invalid command\n
 17. Unknown command: invalid command\n
 18. Empty line: invalid command\n
 19. If more dollar signs are in input than allowed for command (0 for GET and DEL, 2 for SET), then stop and return: invalid command\n
