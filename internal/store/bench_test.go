@@ -9,13 +9,6 @@ import (
 	"testing"
 )
 
-// kv is the API both stores share, so one benchmark body drives either.
-type kv interface {
-	Get(key string) (string, bool)
-	Set(key, value string, ttlSeconds int) int
-	Del(key string) int
-}
-
 const (
 	benchKeys = 10000
 	benchVal  = "0123456789abcdef" // fixed 16 bytes (SPEC.md 2b rule 11)
@@ -29,10 +22,10 @@ var benchParallelism = []int{1, 4, 16}
 func BenchmarkStores(b *testing.B) {
 	impls := []struct {
 		name string
-		mk   func() kv
+		mk   func() KV
 	}{
-		{"single", func() kv { return New() }},
-		{"sharded", func() kv { return NewSharded(5) }},
+		{"single", func() KV { return New() }},
+		{"sharded", func() KV { return NewSharded(5) }},
 	}
 	keys := make([]string, benchKeys)
 	for i := range keys {

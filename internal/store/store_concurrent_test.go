@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestConcurrentDelDeletesEachKeyOnce checks SPEC.md 2b rule 3: concurrent
@@ -13,13 +14,20 @@ import (
 // across all goroutines must add up to exactly the number of keys.
 // Without the store's lock this either crashes with "concurrent map writes"
 // or over-counts because two goroutines both see the same key as live.
+//
+// It runs against both stores (SPEC.md 2b rule 7); the fake clock is unused.
 func TestConcurrentDelDeletesEachKeyOnce(t *testing.T) {
+	forEachStore(t, func(t *testing.T, s KV, _ *time.Time) {
+		concurrentDelDeletesEachKeyOnce(t, s)
+	})
+}
+
+func concurrentDelDeletesEachKeyOnce(t *testing.T, s KV) {
 	const (
 		numKeys       = 10000
-		numGoroutines = 8
+		numGoroutines = 16
 	)
 
-	s := New()
 	keys := make([]string, numKeys)
 	for i := range keys {
 		keys[i] = "k" + strconv.Itoa(i)
