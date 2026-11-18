@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gocache/internal/protocol"
+	"gocache/internal/store"
 )
 
 // MaxLineLength is the longest command line (excluding the trailing
@@ -293,13 +294,9 @@ func (p servePolicy) stopping() bool { return p.ctx.Err() != nil }
 func (p servePolicy) armRead()       { p.tracker.armIdle(p.conn, p.cfg.IdleTimeout) }
 func (p servePolicy) armWrite()      { p.tracker.armWrite(p.conn, p.cfg.WriteTimeout) }
 
-// KV is the store API the server needs. Both *store.Store (single lock) and
-// *store.ShardedStore satisfy it.
-type KV interface {
-	Get(key string) (string, bool)
-	Set(key, value string, ttlSeconds int) int
-	Del(key string) int
-}
+// KV is the store API the server needs; it is store.KV, which both the
+// single-lock Store and the ShardedStore satisfy.
+type KV = store.KV
 
 // dispatch is what HandleConn calls to execute a line. It is a variable only
 // so tests can inject a panic; like Store.now, it is set before any goroutine
