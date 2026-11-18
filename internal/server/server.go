@@ -162,12 +162,7 @@ func ServeConfig(ctx context.Context, ln net.Listener, s KV, cfg Config) error {
 		}
 		conns.Go(func() {
 			defer tracker.remove(conn)
-			// Shutdown has started the moment ctx is cancelled; ctx.Err is set
-			// synchronously by cancel, before the watcher goroutine runs.
-			serveConn(conn, s,
-				func() bool { return ctx.Err() != nil },
-				func() { tracker.armIdle(conn, cfg.IdleTimeout) },
-				func() { tracker.armWrite(conn, cfg.WriteTimeout) })
+			serveConn(conn, s, servePolicy{ctx: ctx, tracker: tracker, conn: conn, cfg: cfg})
 		})
 	}
 }
@@ -259,15 +254,44 @@ func setShutdownDeadlines(conn net.Conn) {
 // connection (HandleConn's deferred Close still runs while unwinding) and the
 // server keeps running (SPEC.md 2b rule 16). Fatal runtime errors cannot be
 // recovered (rule 17).
-func serveConn(conn net.Conn, s KV, stopping func() bool, beforeRead, beforeWrite func()) {
+func serveConn(conn net.Conn, s KV, p connPolicy) {
 	remote := conn.RemoteAddr()
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("panic serving %v: %v\n%s", remote, r, debug.Stack())
 		}
 	}()
-	handleConn(conn, s, stopping, beforeRead, beforeWrite)
+	handleConn(conn, s, p)
 }
+
+// connPolicy is what ServeConfig adds around a connection: when to stop for a
+// shutdown, and the per-line read and per-reply write deadlines.
+type connPolicy interface {
+	stopping() bool // shutdown has started (SPEC.md Phase 4 rule 5)
+	armRead()       // before waiting for each line (Phase 6 rules 4-5)
+	armWrite()      // before writing each reply (Phase 6 rule 7)
+}
+
+// noPolicy is HandleConn's policy: never stop, no deadlines.
+type noPolicy struct{}
+
+func (noPolicy) stopping() bool { return false }
+func (noPolicy) armRead()       {}
+func (noPolicy) armWrite()      {}
+
+// servePolicy is ServeConfig's policy for one connection.
+type servePolicy struct {
+	ctx     context.Context
+	tracker *connTracker
+	conn    net.Conn
+	cfg     Config
+}
+
+// stopping reads ctx.Err, which cancel sets synchronously, before the shutdown
+// watcher goroutine runs.
+func (p servePolicy) stopping() bool { return p.ctx.Err() != nil }
+func (p servePolicy) armRead()       { p.tracker.armIdle(p.conn, p.cfg.IdleTimeout) }
+func (p servePolicy) armWrite()      { p.tracker.armWrite(p.conn, p.cfg.WriteTimeout) }
 
 // KV is the store API the server needs. Both *store.Store (single lock) and
 // *store.ShardedStore satisfy it.
@@ -287,23 +311,21 @@ var dispatch = Dispatch
 // shutdown; ServeContext runs each connection through handleConn instead, in
 // its own goroutine. Neither starts goroutines itself.
 func HandleConn(conn net.Conn, s KV) {
-	handleConn(conn, s, func() bool { return false }, func() {}, func() {})
+	handleConn(conn, s, noPolicy{})
 }
 
-// handleConn is HandleConn with a shutdown check: once stopping reports true,
-// no further line is executed, even one already received and buffered, and
-// the connection closes (SPEC.md Phase 4 rule 5). A line whose dispatch has
-// already begun runs to completion and its response is written. beforeRead
-// runs before waiting for each line; ServeConfig uses it to restart the idle
-// timeout, so the timeout covers one whole line (SPEC.md Phase 6 rule 5).
-// beforeWrite runs before writing each reply; ServeConfig uses it to arm the
-// write timeout (rule 7).
-func handleConn(conn net.Conn, s KV, stopping func() bool, beforeRead, beforeWrite func()) {
+// handleConn is HandleConn with a connection policy: once p.stopping reports
+// true, no further line is executed, even one already received and buffered,
+// and the connection closes (SPEC.md Phase 4 rule 5). A line whose dispatch
+// has already begun runs to completion and its response is written. p.armRead
+// runs before waiting for each line, so the idle timeout covers one whole line
+// (SPEC.md Phase 6 rule 5); p.armWrite runs before writing each reply (rule 7).
+func handleConn(conn net.Conn, s KV, p connPolicy) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
 	for {
-		beforeRead()
+		p.armRead()
 		line, tooLong, err := readLine(reader)
 		if err != nil {
 			// Connection closed or interrupted mid-command: discard
@@ -311,12 +333,12 @@ func handleConn(conn net.Conn, s KV, stopping func() bool, beforeRead, beforeWri
 			return
 		}
 
-		if stopping() {
+		if p.stopping() {
 			return // discard this line and anything after it, unexecuted
 		}
 
 		if tooLong {
-			beforeWrite()
+			p.armWrite()
 			if _, werr := io.WriteString(conn, "max line length exceeded\n"); werr != nil {
 				return
 			}
@@ -324,7 +346,7 @@ func handleConn(conn net.Conn, s KV, stopping func() bool, beforeRead, beforeWri
 		}
 
 		reply := dispatch(s, line)
-		beforeWrite()
+		p.armWrite()
 		if _, werr := io.WriteString(conn, reply); werr != nil {
 			return
 		}
@@ -359,7 +381,9 @@ func Dispatch(s KV, line string) string {
 // If the line exceeds MaxLineLength characters, it is fully drained from
 // the reader (so parsing can resume with the next line) and tooLong is
 // reported true instead of returning an error. err is non-nil only when
-// the underlying read failed or hit EOF before a newline was found.
+// the underlying read failed or hit EOF before a newline was found. buf does
+// not escape, so the compiler keeps it on the stack: no heap allocation per
+// line (checked with -benchmem).
 func readLine(r *bufio.Reader) (line string, tooLong bool, err error) {
 	buf := make([]byte, 0, MaxLineLength)
 	count := 0
