@@ -50,6 +50,8 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - SaveFile is atomic: temp file in the same directory, fsync, rename, fsync the directory.
 - Missing snapshot: start empty. Corrupt snapshot: refuse to start, naming the file.
 - TTLs are stored as absolute wall-clock Unix nanoseconds; a clock jump between save and load shifts expiries (known limitation).
+- TTLs above 100 years (MaxTTLSeconds, in both internal/protocol and internal/store, pinned equal by a test in internal/server) are rejected: invalid command on the wire, Set returns 0. This keeps expiries inside time.Duration and the snapshot's Unix-nanosecond range.
+- An empty key makes a snapshot corrupt, and Import skips empty keys as a backstop. Leftover .gocache-*.tmp files are removed at startup (one server per snapshot directory). The directory fsync is skipped on Windows.
 - run(ctx, ln, expiryInterval, snapshotInterval, path) is main's testable body; tests pass a t.TempDir path.
 - Save failures: saveFile goes through an internal fileSystem interface so tests can fail any single step (fakeFS) and check step order; one end-to-end test uses a real non-empty directory at the snapshot path to make the rename fail. A failed periodic save is logged and retried next tick; a failed save leaves the old snapshot and no temp file (except a failed directory fsync, after which the new file is in place but the save still reports an error).
 
@@ -60,6 +62,7 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - Write timeout: the write deadline is set before each reply (after dispatch, so it covers only the write). A client that never reads is closed, freeing its slot.
 - Shutdown always wins: armIdle and armWrite take the tracker lock and do nothing once shutdown has started. The shutdown watcher applies shutdown deadlines before closing the listener.
 - Network-deadline tests run on the real clock with short timeouts and bounded waits, never time.Sleep (see Testing philosophy).
+- Negative Config fields are an error from ServeConfig. Per-connection behavior (shutdown check, read and write deadlines) goes through a connPolicy: noPolicy for HandleConn, servePolicy for ServeConfig.
 
 ## Carried into the next phase
 - Crash durability can only be checked in-process as step order (write, fsync file, close, rename, fsync dir); a real power-loss test would need a VM or fault-injecting block device.
