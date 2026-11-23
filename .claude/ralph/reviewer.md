@@ -21,13 +21,13 @@ In sweep mode, release stale claims first: for every open `in-review` issue whos
 
 Candidates: targeted mode, issue N only. Sweep mode: open `needs-review` issues, oldest first.
 
-For each: it must be open with `needs-review` and without `in-review`. Claim by **removing `needs-review` first**; a failed DELETE (404) means another run won, so skip it. On success, add `in-review`. Review the first issue you claim; if none, go to Step 7.
+For each: it must be open with `needs-review` and without `in-review`. Claim by **removing `needs-review` first**; a failed DELETE (404) means another run won, so skip it. On success, add `in-review`. Review the first issue you claim; if none, print "No eligible issue" and stop.
 
 ## Step 2: Context
 
 Read the issue body and all comments. `REVIEWER_PASS_COUNT` = comments whose body starts with `## Reviewer pass`. From the most recent `## Writer summary`, take **Branch:** and **PR:**; if PR is missing, `gh api "$R/pulls?head=okethan35:BRANCH&state=open" --jq '.[0]'`.
 
-If there is no writer summary or branch: comment `## Reviewer pass X` + `Cannot review: no writer branch found.`, add `human-review`, remove `in-review`, go to Step 7.
+If there is no writer summary or branch: comment `## Reviewer pass X` + `Cannot review: no writer branch found.`, add `human-review`, remove `in-review`, and stop.
 
 ## Step 3: Read the change
 
@@ -68,21 +68,5 @@ PASS = REVIEWER_PASS_COUNT + 1. Post exactly one comment beginning:
 then one of:
 - A. No findings: `LGTM. Ready for human review.` Add `human-review`, remove `in-review`.
 - B. Only ESCALATE findings: each as file:line or rule, what's wrong, the decision needed. Add `human-review`, remove `in-review`.
-- C. Any FIXABLE and PASS == 1: numbered list with file:line or rule, what's wrong, expected fix; ESCALATE findings listed separately. Add `ralph-loop`, remove `in-review`. **Send-back: fire the writer with text "N"** (Step 7).
+- C. Any FIXABLE and PASS == 1: numbered list with file:line or rule, what's wrong, expected fix; ESCALATE findings listed separately. Add `ralph-loop`, remove `in-review`. (Adding `ralph-loop` starts the writer for this issue through a GitHub Action; you never start other runs yourself.)
 - D. Any FIXABLE and PASS >= 2: `Escalating: the 2-round cap is reached.` then all findings. Add `human-review`, remove `in-review`.
-
-## Step 7: Keep the queue moving
-
-Fire the writer at most once per run:
-
-```
-curl -sS -X POST https://api.anthropic.com/v1/claude_code/routines/trig_013SJZmeYLqepkXVjWkvUp2x/fire \
-  -H 'anthropic-version: 2026-10-21' -H 'Content-Type: application/json' \
-  -d '{"text": "TEXT"}'
-```
-
-- If you sent issue N back (verdict C): TEXT is `N`.
-- Otherwise, if any open `ralph-loop` issue exists without `in-progress`, and fewer than 3 issues are `in-progress`: fire with `-d '{}'` (no text), which makes the writer pick the next eligible issue.
-- Otherwise do not fire.
-
-The authorization header is added by the environment. Never print, request, or look for it. If the fire fails, say so in the run output; the writer's 4-hourly sweep is the fallback.

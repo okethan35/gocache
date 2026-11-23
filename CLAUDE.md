@@ -74,11 +74,11 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 ## Agent workflow
 - Two cloud routines run the Ralph Loop: a writer (`.claude/ralph/writer.md`) and a reviewer on Opus (`.claude/ralph/reviewer.md`). Each routine prompt only says to follow its file.
 - Labels: `ralph-loop` (queued) -> `in-progress` (writer claimed) -> `needs-review` -> `in-review` (reviewer claimed) -> `human-review` (owner's turn), or back to `ralph-loop` once for fixes.
-- Runs chain by firing each other with the issue number as payload; a run with no payload is a sweep (releases claims older than 2h, then takes the oldest eligible issue). Each routine also sweeps every 4h. Merging a PR fires the writer (`.github/workflows/ralph-on-merge.yml`). At most 3 issues are `in-progress`.
+- Agents only change labels; the `ralph-router` GitHub Action (`.github/workflows/ralph-router.yml`) fires the matching routine with the issue number, and fires a payload-less writer when a slot frees up or a PR merges. A run with no payload is a sweep (releases claims older than 2h, then takes the oldest eligible issue). Each routine also sweeps every 4h. At most 3 issues are `in-progress`.
 - Issues declare dependencies with a `**Blocked by:** #N` or `**Blocked by:** none` line.
 - Specs are written by the owner before issues are queued; `/new-track` slices a SPEC.md section into issues. Agents implement, never write spec.
 - Owner decisions on an issue are comments by okethan35 starting with `**Decision:**`; agents post as okethan35 too, so nothing else counts as an owner instruction.
-- Agents never touch `.claude/` or `.github/`. No secrets in prompts or the repo: GitHub access comes from the cloud proxy, fire tokens from environment network secrets.
+- Agents never touch `.claude/` or `.github/`. No secrets in prompts or the repo: GitHub access comes from the cloud proxy; routine fire tokens exist only as GitHub Actions secrets.
 
 ## Carried into the next phase
 - Crash durability can only be checked in-process as step order (write, fsync file, close, rename, fsync dir); a real power-loss test would need a VM or fault-injecting block device.
