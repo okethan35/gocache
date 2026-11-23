@@ -1,6 +1,6 @@
 ---
 name: new-track
-description: Break an already-written SPEC.md section into small Ralph Loop GitHub issues, check them for file overlap with open work, and after one confirmation publish them and start the writer. Use when the owner says /new-track, "queue this phase", or "turn this spec section into issues".
+description: Break an already-written SPEC.md section into small Ralph Loop GitHub issues, check them for file overlap with open work, and after one confirmation publish them (the ralph-loop label starts the writers). Use when the owner says /new-track, "queue this phase", or "turn this spec section into issues".
 ---
 
 # /new-track
@@ -80,15 +80,6 @@ Then ask one question: publish as shown, publish with the suggested overlap bloc
 In order T1, T2, ...: replace `T<k>` references with the real issue numbers created so far, then
 `gh issue create --title "<title>" --body-file <file> --label ralph-loop`.
 
-Then start up to 3 writers, one per unblocked issue, using the writer fire token from the owner's environment variable `RALPH_WRITER_FIRE_TOKEN`:
+The `ralph-loop` label starts a writer for each issue through the `ralph-router` GitHub Action; blocked issues and issues over the 3-writer cap wait and are picked up as writers finish. Do not start routines yourself.
 
-```
-curl -sS -X POST https://api.anthropic.com/v1/claude_code/routines/trig_013SJZmeYLqepkXVjWkvUp2x/fire \
-  -H "Authorization: Bearer $RALPH_WRITER_FIRE_TOKEN" \
-  -H 'anthropic-version: 2026-10-21' -H 'Content-Type: application/json' \
-  -d '{"text": "<issue number>"}'
-```
-
-Never print the token. If the variable is unset, say so and tell the owner the writer's 4-hourly sweep will pick the issues up.
-
-Finish with the list of created issue URLs and which ones were started.
+Finish with the list of created issue URLs, noting which are unblocked (starting now) and which are waiting on blockers.

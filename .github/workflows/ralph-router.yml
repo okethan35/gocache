@@ -1,0 +1,71 @@
+name: ralph-router
+
+# Starts Ralph Loop routines when loop labels change or a PR merges.
+# Fire tokens live only in Actions secrets; the agents hold no credentials.
+#   ralph-loop added    -> writer for that issue
+#   needs-review added  -> reviewer for that issue, then writer (no issue) if work is queued
+#   human-review added  -> writer (no issue) if work is queued
+#   PR merged into main -> writer (no issue) if work is queued (blockers may have cleared)
+# A writer fired with no issue picks the oldest eligible ralph-loop issue itself.
+
+on:
+  issues:
+    types: [labeled]
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  issues: read
+
+concurrency:
+  group: ralph-router-${{ github.event.issue.number || github.event.pull_request.number }}-${{ github.event.label.name || 'merge' }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: >-
+      (github.event_name == 'issues' &&
+        contains(fromJSON('["ralph-loop","needs-review","human-review"]'), github.event.label.name)) ||
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    env:
+      WRITER: trig_013SJZmeYLqepkXVjWkvUp2x
+      REVIEWER: trig_01B1EwdffbysMKcefKhQukcR
+      WRITER_TOKEN: ${{ secrets.RALPH_WRITER_FIRE_TOKEN }}
+      REVIEWER_TOKEN: ${{ secrets.RALPH_REVIEWER_FIRE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      LABEL: ${{ github.event.label.name }}
+      ISSUE: ${{ github.event.issue.number }}
+    steps:
+      - name: Route
+        run: |
+          set -euo pipefail
+
+          fire() { # fire ROUTINE_ID TOKEN [ISSUE]
+            if [ -z "$2" ]; then echo "No token for $1; skipping (4h sweep is the fallback)."; return 0; fi
+            if [ -n "${3:-}" ]; then body="{\"text\": \"$3\"}"; else body='{}'; fi
+            curl -sS --fail-with-body -X POST \
+              "https://api.anthropic.com/v1/claude_code/routines/$1/fire" \
+              -H "Authorization: Bearer $2" \
+              -H 'anthropic-version: 2026-10-21' \
+              -H 'Content-Type: application/json' \
+              -d "$body" -o /dev/null -w "fired $1 ${3:-(sweep)}: HTTP %{http_code}\n"
+          }
+
+          queued() { # any open ralph-loop issue?
+            n=$(gh api "repos/${{ github.repository }}/issues?labels=ralph-loop&state=open&per_page=1" --jq length)
+            [ "$n" -gt 0 ]
+          }
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            queued && fire "$WRITER" "$WRITER_TOKEN" || echo "Nothing queued."
+            exit 0
+          fi
+
+          case "$LABEL" in
+            ralph-loop)   fire "$WRITER" "$WRITER_TOKEN" "$ISSUE" ;;
+            needs-review) fire "$REVIEWER" "$REVIEWER_TOKEN" "$ISSUE"
+                          queued && fire "$WRITER" "$WRITER_TOKEN" || echo "Nothing queued." ;;
+            human-review) queued && fire "$WRITER" "$WRITER_TOKEN" || echo "Nothing queued." ;;
+          esac
