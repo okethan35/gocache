@@ -1,7 +1,7 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry), Phase 4 (graceful shutdown) Phase 5 (persistence) and Phase 6 (connection limits) are done. The next phase is not yet specified. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry), Phase 4 (graceful shutdown) Phase 5 (persistence) and Phase 6 (connection limits) are done. Phase 7 (TTL query) is specified in SPEC.md and in progress: Store.TTL is issue #4, the wire command is issue #5. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
@@ -63,6 +63,18 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - Shutdown always wins: armIdle and armWrite take the tracker lock and do nothing once shutdown has started. The shutdown watcher applies shutdown deadlines before closing the listener.
 - Network-deadline tests run on the real clock with short timeouts and bounded waits, never time.Sleep (see Testing philosophy).
 - Negative Config fields are an error from ServeConfig. Per-connection behavior (shutdown check, read and write deadlines) goes through a connPolicy: noPolicy for HandleConn, servePolicy for ServeConfig.
+
+## Phase 7 decisions (in progress)
+- Store.TTL returns (int64, bool): (-1, true) no expiry, (N, true) N whole seconds left (floor, may be 0), (0, false) missing, expired or empty key.
+- TTL lazily deletes an expired entry, like Get and Del, and holds mu for its whole body.
+- The expiry boundary matches Phase 1 rule 4: now == expiresAt is expired.
+- TTL is added to the KV interface; ShardedStore delegates to the key's shard.
+- Wire reply: `True <N>` (plain integer, no $), `True -1`, or `False $nil$`, same as a GET miss.
+
+## Agent workflow
+- Issues labeled `ralph-loop` are implemented by a scheduled writer agent, reviewed by a scheduled reviewer agent (`needs-review`), and handed to the owner (`human-review`).
+- Issues declare dependencies with a `**Blocked by:** #N` or `**Blocked by:** none` line.
+- Specs are written by the owner before issues are queued; agents implement, never write spec.
 
 ## Carried into the next phase
 - Crash durability can only be checked in-process as step order (write, fsync file, close, rename, fsync dir); a real power-loss test would need a VM or fault-injecting block device.
