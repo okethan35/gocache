@@ -226,3 +226,32 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 12. Missing, expired, or empty key: `False $nil$\n`, the same reply as a GET miss.
 13. Malformed input follows Phase 2a: no key, extra trailing arguments, or any `$` in the line returns `invalid command\n` and keeps the connection open. `TTL` is case sensitive like every other command (2a rule 2).
 14. A TTL command never changes the store except for the lazy cleanup of an expired entry (rule 4).
+
+
+# Phase 8 spec
+
+## EXPIRE and PERSIST
+
+### Store.Expire
+1. `Store.Expire(key string, seconds int) int` sets a new expiry on an existing key without changing its value.
+2. If the key is live, its expiry becomes `s.now() + seconds`, replacing any previous expiry or the absence of one, and Expire returns 1.
+3. `seconds == 0` expires the key immediately (Phase 1 rule 4): the entry is deleted from the map and the TTL index at once, and Expire returns 1.
+4. A missing, expired, or empty key returns 0 and changes nothing, except that an expired entry is deleted as lazy cleanup (Phase 7 rule 4).
+5. `seconds < 0` or `seconds > MaxTTLSeconds` (Phase 1 rule 11) returns 0 and changes nothing. Unlike SET, a negative value never means "no expiry"; only PERSIST removes an expiry.
+6. A key given an expiry by Expire is added to the TTL index (Phase 3 rule 5), so the active-expiry sweep can reclaim it.
+
+### Store.Persist
+7. `Store.Persist(key string) int` removes a key's expiry without changing its value.
+8. If the key is live and has an expiry, the expiry is removed, the key is removed from the TTL index, and Persist returns 1. A later TTL on it returns `(-1, true)`.
+9. A missing, expired, or empty key, or a live key with no expiry, returns 0 and changes nothing, except that an expired entry is deleted as lazy cleanup.
+
+### Both
+10. Expire and Persist hold the store lock (`mu`) for their full body and release it with defer, like Get, Set, Del and TTL.
+11. `Expire` and `Persist` are added to the `store.KV` interface. `ShardedStore` delegates both to the key's shard, so both stores follow rules 1-10.
+12. Snapshots (Phase 5) save whatever expiry a key has at that instant, including one set by Expire or removed by Persist. The file format does not change.
+
+### Wire commands
+13. Requests: `EXPIRE <key> <seconds>\n` and `PERSIST <key>\n`. Commands are case sensitive (Phase 2a rule 2).
+14. `<seconds>` must be a base-10 integer between 0 and 3,155,760,000 inclusive. A non-integer, a negative number, or a larger value returns `invalid command\n`.
+15. Replies are the store result as a bare integer, like SET and DEL: `1\n` or `0\n`.
+16. Malformed input follows Phase 2a: a missing key, a missing `<seconds>` for EXPIRE, any extra argument, or any `$` in the line returns `invalid command\n` and keeps the connection open.
