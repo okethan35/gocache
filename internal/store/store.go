@@ -150,3 +150,65 @@ func (s *Store) TTL(key string) (int64, bool) {
 	}
 	return int64(e.expiresAt.Sub(s.now()) / time.Second), true
 }
+
+// Expire sets key's expiry to now+seconds without changing its value, and
+// returns 1. It returns 0 and changes nothing for an empty, missing or expired
+// key (an expired entry is deleted as cleanup) and for seconds outside
+// 0..MaxTTLSeconds. seconds == 0 deletes the key at once (SPEC.md Phase 8
+// rules 1-6).
+func (s *Store) Expire(key string, seconds int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if key == "" {
+		return 0
+	}
+	e, ok := s.data[key]
+	if !ok {
+		return 0
+	}
+	if s.isExpired(e) {
+		s.remove(key)
+		return 0
+	}
+	if seconds < 0 || seconds > MaxTTLSeconds {
+		return 0
+	}
+	if seconds == 0 {
+		s.remove(key)
+		return 1
+	}
+	e.hasExpiry = true
+	e.expiresAt = s.now().Add(time.Duration(seconds) * time.Second)
+	s.data[key] = e
+	s.expires[key] = struct{}{}
+	return 1
+}
+
+// Persist removes key's expiry without changing its value and returns 1. It
+// returns 0 for an empty, missing or expired key (an expired entry is deleted
+// as cleanup) and for a live key with no expiry (SPEC.md Phase 8 rules 7-9).
+func (s *Store) Persist(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if key == "" {
+		return 0
+	}
+	e, ok := s.data[key]
+	if !ok {
+		return 0
+	}
+	if s.isExpired(e) {
+		s.remove(key)
+		return 0
+	}
+	if !e.hasExpiry {
+		return 0
+	}
+	e.hasExpiry = false
+	e.expiresAt = time.Time{}
+	s.data[key] = e
+	delete(s.expires, key)
+	return 1
+}

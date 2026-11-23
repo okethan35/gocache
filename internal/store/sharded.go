@@ -64,3 +64,11 @@ func (s *ShardedStore) Del(key string) int { return s.shardFor(key).Del(key) }
 
 // TTL delegates to the key's shard (SPEC.md Phase 7 rule 8).
 func (s *ShardedStore) TTL(key string) (int64, bool) { return s.shardFor(key).TTL(key) }
+
+// Expire delegates to the key's shard (SPEC.md Phase 8 rule 11).
+func (s *ShardedStore) Expire(key string, seconds int) int {
+	return s.shardFor(key).Expire(key, seconds)
+}
+
+// Persist delegates to the key's shard (SPEC.md Phase 8 rule 11).
+func (s *ShardedStore) Persist(key string) int { return s.shardFor(key).Persist(key) }
