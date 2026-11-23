@@ -369,6 +369,12 @@ func Dispatch(s KV, line string) string {
 		return "False $nil$\n"
 	case "DEL":
 		return fmt.Sprintf("%d\n", s.Del(cmd.Key))
+	case "TTL":
+		secs, ok := s.TTL(cmd.Key)
+		if !ok {
+			return "False $nil$\n"
+		}
+		return fmt.Sprintf("True %d\n", secs)
 	default:
 		return "invalid command\n"
 	}
