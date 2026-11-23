@@ -215,3 +215,14 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 5. An empty key returns `(0, false)` without touching the map.
 6. TTL holds the store lock (`mu`) for its full body and releases it with defer, consistent with Get, Set, and Del.
 7. The expiry boundary follows Phase 1 rule 4: a key whose `expiresAt` equals `s.now()` is already expired (returns `(0, false)`). Only `s.now().Before(e.expiresAt)` is alive.
+
+### KV interface
+8. `TTL(key string) (int64, bool)` is added to the `store.KV` interface. `ShardedStore.TTL` delegates to the key's shard, the same way its Get, Set and Del do, so both stores follow rules 1-7.
+
+### Wire command
+9. Request: `TTL <key>\n`. TTL takes exactly one argument, the key, like GET and DEL (Phase 2a rules 5, 11, 13).
+10. Key with an expiry: `True <N>\n`, where N is the whole seconds remaining from rule 2, written as a plain integer (not wrapped in `$`). N may be 0.
+11. Key with no expiry: `True -1\n`.
+12. Missing, expired, or empty key: `False $nil$\n`, the same reply as a GET miss.
+13. Malformed input follows Phase 2a: no key, extra trailing arguments, or any `$` in the line returns `invalid command\n` and keeps the connection open. `TTL` is case sensitive like every other command (2a rule 2).
+14. A TTL command never changes the store except for the lazy cleanup of an expired entry (rule 4).
