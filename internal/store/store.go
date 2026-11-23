@@ -121,32 +121,6 @@ func (s *Store) Del(key string) int {
 	return 1
 }
 
-// TTL returns the remaining time-to-live of key in whole seconds (truncated
-// toward zero) and true, (-1, true) if the key has no expiry, or (0, false) if
-// the key is empty, missing or expired. An expired entry found here is removed
-// as a lazy-cleanup side effect, like Get and Del (SPEC.md Phase 7).
-func (s *Store) TTL(key string) (int64, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if key == "" {
-		return 0, false
-	}
-	e, ok := s.data[key]
-	if !ok {
-		return 0, false
-	}
-	if !e.hasExpiry {
-		return -1, true
-	}
-	now := s.now()
-	if !now.Before(e.expiresAt) {
-		s.remove(key)
-		return 0, false
-	}
-	return int64(e.expiresAt.Sub(now) / time.Second), true
-}
-
 // remove deletes key from data and from the TTL index. Callers hold s.mu.
 func (s *Store) remove(key string) {
 	delete(s.data, key)
