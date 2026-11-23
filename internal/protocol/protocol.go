@@ -22,16 +22,16 @@ const MaxTTLSeconds = 3155760000
 var ErrInvalidCommand = errors.New("invalid command")
 
 // ParseCommand parses a single wire-protocol line (without the trailing
-// newline) per SPEC.md's "2a - Protocol" section: SET/GET/DEL only, command
+// newline) per SPEC.md's "2a - Protocol" section: SET/GET/DEL/TTL only, command
 // word case-sensitive and fully capital, key is a single word, SET values
-// wrapped in exactly one pair of '$', GET/DEL forbid '$' entirely.
+// wrapped in exactly one pair of '$', GET/DEL/TTL forbid '$' entirely.
 func ParseCommand(line string) (Command, error) {
 	if line == "" {
 		return Command{}, ErrInvalidCommand
 	}
 
 	op, rest, hasRest := strings.Cut(line, " ")
-	if op != "SET" && op != "GET" && op != "DEL" {
+	if op != "SET" && op != "GET" && op != "DEL" && op != "TTL" {
 		return Command{}, ErrInvalidCommand
 	}
 	if !hasRest || rest == "" {

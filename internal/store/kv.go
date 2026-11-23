@@ -8,6 +8,7 @@ type KV interface {
 	Get(key string) (string, bool)
 	Set(key, value string, ttlSeconds int) int
 	Del(key string) int
+	TTL(key string) (int64, bool)
 }
 
 // Both stores must keep satisfying KV.

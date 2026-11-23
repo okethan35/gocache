@@ -61,3 +61,6 @@ func (s *ShardedStore) Set(key, value string, ttlSeconds int) int {
 }
 
 func (s *ShardedStore) Del(key string) int { return s.shardFor(key).Del(key) }
+
+// TTL delegates to the key's shard (SPEC.md Phase 7 rule 8).
+func (s *ShardedStore) TTL(key string) (int64, bool) { return s.shardFor(key).TTL(key) }
