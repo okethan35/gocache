@@ -1,3 +1,6 @@
+// Package protocol parses the gocache wire format into commands.
+// It holds wire-format parsing only: it contains no store logic and no
+// networking code.
 package protocol
 
 import (
