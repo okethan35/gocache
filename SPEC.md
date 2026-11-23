@@ -200,3 +200,18 @@ Commands supported: SET key value [ttl_seconds], GET key, DEL key
 
 ### API
 9. server.Config{MaxClients, IdleTimeout, WriteTimeout} and server.ServeConfig(ctx, ln, s, cfg). A zero field means the default (1000, 5 minutes, 10 seconds). ServeContext and Serve use the defaults. A negative field is an error: ServeConfig returns it without serving.
+
+
+# Phase 7 spec
+
+## TTL query
+
+### Store.TTL
+
+1. `Store.TTL(key string) (int64, bool)` returns the remaining time-to-live for a key.
+2. If the key exists and has an expiry, TTL returns `(N, true)` where N is the number of whole seconds remaining, truncated toward zero (floor). N may be 0 if less than one second remains but the key has not yet expired by the lazy-expiry rule.
+3. If the key exists but has no expiry set, TTL returns `(-1, true)`.
+4. If the key is missing or expired, TTL returns `(0, false)`. An expired entry found during TTL is deleted from the map as a lazy-cleanup side effect, consistent with Get and Del.
+5. An empty key returns `(0, false)` without touching the map.
+6. TTL holds the store lock (`mu`) for its full body and releases it with defer, consistent with Get, Set, and Del.
+7. The expiry boundary follows Phase 1 rule 4: a key whose `expiresAt` equals `s.now()` is already expired (returns `(0, false)`). Only `s.now().Before(e.expiresAt)` is alive.
