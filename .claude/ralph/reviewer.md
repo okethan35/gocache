@@ -39,6 +39,11 @@ If there is no writer summary or branch: comment `## Reviewer pass X` + `Cannot 
 2. Falsifiability: for each new or changed test, break the implementation it covers (for example, return a constant), run the test, confirm it fails, restore with `git checkout -- .`. A test that passes against broken code is FIXABLE.
 3. Scope: no existing test modified or deleted (unless an owner decision allows it); no file outside the issue's scope; nothing under `.claude/` or `.github/` (ESCALATE).
 4. Mergeability: `gh api $R/pulls/P --jq '.mergeable,.mergeable_state'`. If `mergeable` is null, wait 5 seconds and retry, up to 5 times. `false` (conflicts with main) is FIXABLE: "merge origin/main and resolve conflicts".
+5. CI: read the `test` check on the PR's head commit: `SHA=$(gh api $R/pulls/P --jq .head.sha)`, then `gh api "$R/commits/$SHA/check-runs?check_name=test" --jq '.check_runs[0] | .status, .conclusion'`.
+   - `completed` + `success`: CI passed.
+   - `completed` with any other conclusion: FIXABLE ("CI `test` failed: <first failing step>"; read it from `gh api $R/check-runs/ID/annotations` or the run log if available).
+   - Not yet completed: wait 30 seconds and check again, for up to 10 minutes. If it still has not completed, ESCALATE ("CI `test` still running after 10 minutes"). Do not return the issue to `needs-review`: that label re-fires the reviewer immediately and would loop.
+   - No `test` check run at all on that commit: ESCALATE ("no CI run for the PR head").
 
 ## Step 5: Findings
 
@@ -48,6 +53,9 @@ Report only:
 3. Logic bugs: behavior that differs from a spec rule.
 4. Scope violations.
 5. Merge conflicts with main.
+6. CI failures, or a PR with no CI run.
+
+Never give `LGTM` unless the `test` check passed on the PR's head commit.
 
 Do not flag style, naming, formatting, or over-engineering.
 
