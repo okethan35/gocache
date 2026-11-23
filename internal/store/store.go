@@ -126,3 +126,27 @@ func (s *Store) remove(key string) {
 	delete(s.data, key)
 	delete(s.expires, key)
 }
+
+// TTL returns the remaining whole seconds (floored) before key expires and
+// true, (-1, true) if the key has no expiry, or (0, false) if the key is
+// empty, missing or expired. An expired entry found here is removed, as in Get.
+func (s *Store) TTL(key string) (int64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if key == "" {
+		return 0, false
+	}
+	e, ok := s.data[key]
+	if !ok {
+		return 0, false
+	}
+	if s.isExpired(e) {
+		s.remove(key)
+		return 0, false
+	}
+	if !e.hasExpiry {
+		return -1, true
+	}
+	return int64(e.expiresAt.Sub(s.now()) / time.Second), true
+}
