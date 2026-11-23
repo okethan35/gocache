@@ -9,6 +9,8 @@ type KV interface {
 	Set(key, value string, ttlSeconds int) int
 	Del(key string) int
 	TTL(key string) (int64, bool)
+	Expire(key string, seconds int) int
+	Persist(key string) int
 }
 
 // Both stores must keep satisfying KV.
