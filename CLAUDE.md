@@ -1,7 +1,7 @@
 # gocache - project conventions
 
 ## What this is
-A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a (protocol + single-connection TCP server) and Phase 2b (concurrency) Phase 3 (active expiry), Phase 4 (graceful shutdown) Phase 5 (persistence) and Phase 6 (connection limits) are done. Phase 7 (TTL query) is specified in SPEC.md and in progress: Store.TTL is issue #4, the wire command is issue #5. See SPEC.md for behavior contracts.
+A Redis-style in-memory key-value cache server in Go. Phases 1-7 are done. Phase 8 (EXPIRE and PERSIST) is in progress: Store.Expire/Persist (#23) is merged, the wire commands are #24. See SPEC.md for behavior contracts.
 
 ## Testing philosophy
 - Tests in the *_test.go files are the source of truth, written before implementation.
@@ -23,11 +23,10 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 ## Phase 2b decisions (done)
 - Store uses a plain sync.Mutex (mu field on Store), locked for the whole body of Get/Set/Del and released with defer. Revisit only if a benchmark shows a meaningful gap at a realistic read-heavy mix.
 - `now` is set only at construction (or by a test before any goroutine starts) and never reassigned, so it needs no lock.
-- A sharded store is built alongside the single-lock store for benchmarking: shard = fnv32(key) % numShards, each shard with its own map and mutex, starting at 5 shards. Result: sharded was only ~10% faster (ratio 0.90), so the single lock is kept; see BENCHMARKS.md. Padded shards (128 bytes each, TestShardsDoNotShareCacheLines) reach 0.61 at store level but make no measurable difference through the server (ratio 1.02, BenchmarkServer), so the server keeps the single lock; see BENCHMARKS.md. The server takes a KV interface (Get/Set/Del), so either store can be benchmarked through it. Benchmark spec: b.RunParallel at SetParallelism 1/4/16, 70/20/10 GET/SET/DEL mix, 10,000 uniform keys, comparing ns/op. If sharded is <20% faster at the highest parallelism: verify go test -race and per-shard mutexes, check key spread, try another hash, re-run higher. If still <20% or slower, keep the single lock and log why.
+- A sharded store is built alongside the single-lock store for benchmarking: shard = fnv32(key) % numShards, each shard with its own map and mutex, starting at 5 shards. Result: sharded was only ~10% faster (ratio 0.90), so the single lock is kept; see BENCHMARKS.md. Padded shards (128 bytes each, TestShardsDoNotShareCacheLines) reach 0.61 at store level but make no measurable difference through the server (ratio 1.02, BenchmarkServer), so the server keeps the single lock; see BENCHMARKS.md. The server takes the store.KV interface (internal/store/kv.go), so either store can be benchmarked through it; every new store method goes on KV and both stores implement it. Benchmark spec: b.RunParallel at SetParallelism 1/4/16, 70/20/10 GET/SET/DEL mix, 10,000 uniform keys, comparing ns/op. If sharded is <20% faster at the highest parallelism: verify go test -race and per-shard mutexes, check key spread, try another hash, re-run higher. If still <20% or slower, keep the single lock and log why.
 - Goroutine model: one goroutine per connection; the store is the only shared state. The accept loop moves from cmd/server into internal/server so the goroutine model can be tested.
-- The concurrent store test must fail under plain `go test` (no -race) when the lock is missing. (Settled in Phase 4: all tests must also pass under `-race`; see Testing philosophy.)
 - Panic recovery: a deferred recover in the goroutine Serve starts per connection; a panic closes only that connection and is logged with its stack trace. Fatal runtime errors are not recoverable.
-- Serve waits for all open connections to end before returning after the listener closes, so nothing it started outlives it. Full graceful shutdown (closing open connections) is out of scope for 2b.
+- Serve waits for all open connections to end before returning after the listener closes, so nothing it started outlives it.
 
 ## Phase 3 decisions (done)
 - Active expiry never changes command results; lazy expiry stays the source of correctness, the sweep only reclaims memory.
@@ -41,7 +40,7 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - server.ServeContext(ctx, ln, s): cancelling ctx closes the listener, sets every open connection's read deadline to now and write deadline to now+1s, and returns nil once all connections end. Serve(ln, s) is ServeContext with a never-cancelled context, so its tests are unchanged.
 - Shutdown starts the instant ctx is cancelled: connections check ctx.Err() before executing each line, so lines already received but not started are discarded unexecuted. Only the command already executing finishes and gets its reply.
 - Client contract: a reply means the command ran; no reply means it may or may not have run and is safe to retry.
-- main's body lives in run(ctx, ...) so it can be tested by cancelling ctx: log "shutting down", drain, stop the expiry sweep, log "stopped", exit 0. (Phase 5 added snapshot steps; see below.)
+- main's body lives in run(ctx, ...) so it can be tested by cancelling ctx. Shutdown order: log "shutting down", drain connections, stop the expiry sweep, save the final snapshot, log "stopped". Exit 0, or exit 1 if the final save failed.
 
 ## Phase 5 decisions (done)
 - Persistence is by snapshot to dump.gocache (always on): loaded at startup before serving, saved every 60s and once more at shutdown after draining and stopping the sweep. A failed final save exits 1.
@@ -64,7 +63,7 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - Network-deadline tests run on the real clock with short timeouts and bounded waits, never time.Sleep (see Testing philosophy).
 - Negative Config fields are an error from ServeConfig. Per-connection behavior (shutdown check, read and write deadlines) goes through a connPolicy: noPolicy for HandleConn, servePolicy for ServeConfig.
 
-## Phase 7 decisions (in progress)
+## Phase 7 decisions (done)
 - Store.TTL returns (int64, bool): (-1, true) no expiry, (N, true) N whole seconds left (floor, may be 0), (0, false) missing, expired or empty key.
 - TTL lazily deletes an expired entry, like Get and Del, and holds mu for its whole body.
 - The expiry boundary matches Phase 1 rule 4: now == expiresAt is expired.
@@ -76,8 +75,8 @@ A Redis-style in-memory key-value cache server in Go. Phase 1 (store), Phase 2a 
 - Labels: `ralph-loop` (queued) -> `in-progress` (writer claimed) -> `needs-review` -> `in-review` (reviewer claimed) -> `human-review` (owner's turn), or back to `ralph-loop` once for fixes.
 - Agents only change labels; the `ralph-router` GitHub Action (`.github/workflows/ralph-router.yml`) fires the matching routine with the issue number, and fires a payload-less writer when a slot frees up or a PR merges. A run with no payload is a sweep (releases claims older than 2h, then takes the oldest eligible issue). Each routine also sweeps every 4h. At most 3 issues are `in-progress`.
 - Issues declare dependencies with a `**Blocked by:** #N` or `**Blocked by:** none` line.
-- Specs are written by the owner before issues are queued; `/new-track` slices a SPEC.md section into issues. Agents implement, never write spec.
-- Owner decisions on an issue are comments by okethan35 starting with `**Decision:**`; agents post as okethan35 too, so nothing else counts as an owner instruction.
+- Specs are written by the owner before issues are queued; `/new-track` slices a SPEC.md section into issues. Agents implement, never write spec. Agents change SPEC.md or CLAUDE.md only when an owner-written issue gives the exact text.
+- Owner decisions on an issue are comments by okethan35 starting with `**Decision:**`; agents post as okethan35 too, so nothing else counts as an owner instruction. Agents never start a comment with `**Decision:**`.
 - Agents never touch `.claude/` or `.github/`. No secrets in prompts or the repo: GitHub access comes from the cloud proxy; routine fire tokens exist only as GitHub Actions secrets.
 
 ## Carried into the next phase
