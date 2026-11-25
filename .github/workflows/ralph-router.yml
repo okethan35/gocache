@@ -13,6 +13,9 @@ on:
     types: [labeled, unlabeled, closed, reopened]
   pull_request_target: # base-branch copy of this file, so a PR cannot change it
     types: [closed]
+  workflow_run: # CI finished: a queued review may now be ready (rule 32)
+    workflows: [ci]
+    types: [completed]
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
@@ -20,6 +23,8 @@ on:
 permissions:
   contents: read
   issues: write
+  pull-requests: read
+  checks: read
 
 concurrency:
   group: ralph-reconciler

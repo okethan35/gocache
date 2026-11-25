@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Ralph Loop reconciler (.claude/ralph/SPEC.md rules 3, 21-31, 37).
+"""Ralph Loop reconciler (.claude/ralph/SPEC.md rules 3, 6, 21-37).
 
 Run by .github/workflows/ralph-router.yml from the default branch. Every run
 recomputes from current GitHub state and ignores which event started it (rule 22):
 
-  validate config -> strip loop labels from closed issues -> release stale claims
-  -> claim and fire reviewers -> claim and fire writers -> write the summary
+  validate config -> strip loop labels from closed issues -> lock loop issues
+  -> release stale claims -> apply requeues -> claim and fire reviewers (after CI)
+  -> claim and fire writers -> notify the owner -> report stuck states -> summary
 
 The reconciler is the only thing that claims issues or starts routines.
 Standard library only. `reconcile.py --dry-run` prints what it would do without writing.
@@ -23,6 +24,9 @@ from datetime import datetime, timezone
 LABEL_KEYS = ("queued", "writing", "review_queued", "reviewing", "human")
 ROUTER_HEADER = "## Ralph router"
 EXPIRED_MARKER = "<!-- ralph:expired -->"
+NOTIFIED_MARKER = "<!-- ralph:notified -->"
+STUCK_MARKER = "<!-- ralph:stuck {} -->"
+CI_WAIT_SECONDS = 30 * 60  # rule 33
 BOT = "github-actions[bot]"
 FIRE_URL = "https://api.anthropic.com/v1/claude_code/routines/{id}/fire"
 
@@ -96,6 +100,19 @@ class GitHub:
 
     def comments(self, n):
         return self._paged(f"repos/{self.repo}/issues/{n}/comments?per_page=100")
+
+    def open_pulls(self):
+        return self._paged(f"repos/{self.repo}/pulls?state=open&per_page=100")
+
+    def check_runs(self, sha, name):
+        out = self._api([f"repos/{self.repo}/commits/{sha}/check-runs?check_name={name}&per_page=100"])
+        return out.get("check_runs", [])
+
+    def lock(self, n):
+        if self.dry_run:
+            print(f"[dry-run] #{n} lock conversation")
+            return
+        self._api(["-X", "PUT", f"repos/{self.repo}/issues/{n}/lock", "--input", "-"], {})
 
     def set_labels(self, n, labels):
         """Rule 29: one call that sets the issue's full label set."""
@@ -178,6 +195,28 @@ def is_second_expiry(comments):
     return True
 
 
+def latest_trusted_loop_comment(comments, owner):
+    """The latest owner-authored loop comment, or the reconciler's own hand-off note."""
+    for c in reversed(comments):
+        body = c.get("body") or ""
+        login = c.get("user", {}).get("login")
+        if login == owner and body.startswith(("## Reviewer pass", "## Writer escalation", "## Writer summary")):
+            return c
+        if login == BOT and body.startswith(ROUTER_HEADER) and NOTIFIED_MARKER not in body and "ralph:stuck" not in body:
+            return c
+    return None
+
+
+def verdict_line(comment):
+    """The header plus the first line that says what happened, e.g. `Reviewer pass 1: LGTM. Ready for human review.`"""
+    if not comment:
+        return "no loop comment found"
+    skip = ("<!--", "**PR:**", "**Branch:**", "**Summary:**", "-", "*")
+    lines = [l.strip() for l in comment["body"].splitlines()[1:] if l.strip() and not l.strip().startswith(skip)]
+    head = comment["body"].splitlines()[0].lstrip("# ").strip()
+    return f"{head}: {lines[0]}" if lines else head
+
+
 # ---------- the run ----------
 
 class Reconciler:
@@ -243,11 +282,106 @@ class Reconciler:
         self.failed = True
         return False
 
-    def claim_reviewers(self, issues):
+    def lock_loop_issues(self, issues):
+        """Rule 6: only collaborators can comment on an issue the loop works on."""
+        for issue in issues:
+            if label_names(issue) & self.loop and not issue.get("locked"):
+                self.gh.lock(issue["number"])
+                issue["locked"] = True
+                self.log(f"#{issue['number']}: conversation locked to collaborators")
+
+    def apply_requeues(self, issues):
+        """Rule 34: the owner re-queues by adding `queued`."""
+        live = {self.L["writing"], self.L["reviewing"]}
         for issue in issues:
             names = label_names(issue)
-            if self.L["review_queued"] in names and not (names & (self.loop - {self.L["review_queued"]})):
-                self.claim_and_fire(issue, self.L["reviewing"], "reviewer")
+            if self.L["queued"] not in names:
+                continue
+            others = names & (self.loop - {self.L["queued"]})
+            if not others:
+                continue
+            n = issue["number"]
+            held = others & live
+            if len(held) == 1:
+                claim = next(iter(held))
+                self.relabel(issue, claim)
+                self.log(f"#{n}: `{self.L['queued']}` removed, a run holds `{claim}`")
+            elif not held:
+                self.relabel(issue, self.L["queued"])
+                self.log(f"#{n}: re-queued, removed {', '.join(sorted(others))}")
+            # two live claims at once: left for report_stuck
+
+    def pr_for(self, n, pulls):
+        pat = re.compile(rf"issue-{n}(?:-[a-z0-9-]+)?")
+        found = [p for p in pulls
+                 if pat.fullmatch(p["head"]["ref"]) and (p["head"].get("repo") or {}).get("full_name") == self.cfg["repo"]]
+        return (found[0] if len(found) == 1 else None), len(found)
+
+    def claim_reviewers(self, issues):
+        """Rules 32-33: fire the reviewer only after CI finished on the PR head."""
+        pulls = None
+        for issue in issues:
+            names = label_names(issue)
+            if not (self.L["review_queued"] in names and not (names & (self.loop - {self.L["review_queued"]}))):
+                continue
+            n = issue["number"]
+            if pulls is None:
+                pulls = self.gh.open_pulls()
+            pr, count = self.pr_for(n, pulls)
+            if pr:
+                runs = self.gh.check_runs(pr["head"]["sha"], self.cfg["ci_check"])
+                if runs and all(r.get("status") == "completed" for r in runs):
+                    self.claim_and_fire(issue, self.L["reviewing"], "reviewer")
+                    continue
+                why = f"waiting for `{self.cfg['ci_check']}` on {pr['head']['sha'][:7]}"
+            else:
+                why = f"no open PR from issue-{n}" if count == 0 else f"{count} open PRs match issue-{n}"
+            since = last_labeled_at(self.gh.events(n), self.L["review_queued"])
+            if since and (self.now - since).total_seconds() > CI_WAIT_SECONDS:
+                self.gh.comment(n, f"{ROUTER_HEADER}\nNo finished `{self.cfg['ci_check']}` run 30 minutes after "
+                                   f"`{self.L['review_queued']}`: {why}. Handing to the owner.")
+                self.relabel(issue, self.L["human"])
+                self.log(f"#{n}: no finished CI after 30 min ({why}) -> `{self.L['human']}`")
+            else:
+                self.log(f"#{n}: review queued, {why}")
+
+    def notify_owner(self, issues):
+        """Rule 35: @-mention the owner once each time an issue reaches `human`."""
+        pulls = None
+        for issue in issues:
+            if self.L["human"] not in label_names(issue):
+                continue
+            n = issue["number"]
+            since = last_labeled_at(self.gh.events(n), self.L["human"])
+            comments = self.gh.comments(n)
+            done = [c for c in comments
+                    if c.get("user", {}).get("login") == BOT and NOTIFIED_MARKER in (c.get("body") or "")]
+            if done and (since is None or parse_time(done[-1]["created_at"]) >= since):
+                continue
+            if pulls is None:
+                pulls = self.gh.open_pulls()
+            pr, _ = self.pr_for(n, pulls)
+            link = pr["html_url"] if pr else "no open PR"
+            verdict = verdict_line(latest_trusted_loop_comment(comments, self.cfg["owner"]))
+            self.gh.comment(n, f"{ROUTER_HEADER}\n{NOTIFIED_MARKER}\n@{self.cfg['owner']} your turn on #{n}.\n"
+                               f"- {verdict}\n- PR: {link}")
+            self.log(f"#{n}: owner notified")
+
+    def report_stuck(self, issues):
+        """Rule 36: issues the reconciler will not guess about."""
+        for issue in issues:
+            loop_labels = sorted(label_names(issue) & self.loop)
+            if len(loop_labels) < 2:
+                continue
+            n = issue["number"]
+            marker = STUCK_MARKER.format(",".join(loop_labels))
+            self.log(f"#{n}: STUCK with {', '.join(loop_labels)}")
+            posted = any(marker in (c.get("body") or "") and c.get("user", {}).get("login") == BOT
+                         for c in self.gh.comments(n))
+            if not posted:
+                self.gh.comment(n, f"{ROUTER_HEADER}\n{marker}\n@{self.cfg['owner']} this issue has more than one loop "
+                                   f"label ({', '.join(loop_labels)}) and the reconciler will not guess which is right. "
+                                   f"Move it to one label.")
 
     def claim_writers(self, issues):
         active = sum(1 for i in issues if self.L["writing"] in label_names(i))
@@ -286,9 +420,13 @@ class Reconciler:
     def run(self):
         self.strip_closed()
         issues = self.gh.open_issues()
+        self.lock_loop_issues(issues)
         self.release_stale(issues)
+        self.apply_requeues(issues)
         self.claim_reviewers(issues)
         self.claim_writers(issues)
+        self.notify_owner(issues)
+        self.report_stuck(issues)
         if not self.lines:
             self.log("nothing to do")
         return 1 if self.failed else 0
