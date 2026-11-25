@@ -143,3 +143,5 @@ func TestConcurrentTTLHoldsLock(t *testing.T) {
 		}
 	}
 }
+
+// red-team probe
