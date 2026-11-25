@@ -14,12 +14,12 @@ Argument: the idea, in the owner's words. If none is given, ask for it.
 ## 1. Start
 
 - Derive a short kebab-case slug for the feature. The **brief** lives at `~/.claude/briefs/<repo>/<slug>.md`, where `<repo>` is the basename of `git rev-parse --show-toplevel`. It sits outside the repo so nothing from this session can be committed by accident.
-- If that brief already exists, read it and resume from its open questions.
+- List the briefs in `~/.claude/briefs/<repo>/` with their titles and `Status:` lines. If one plausibly matches the idea (or no idea was given), offer to resume it instead of starting a new one; slugs drift ("incr-command" vs "incr"), so match on the title and premise, not the file name. To resume, read the brief and continue from its open questions.
 - List briefs in `~/.claude/briefs/<repo>/` last modified more than 14 days ago. If any exist, name them in one line and offer to delete them. Delete only the ones the owner says to.
 
 ## 2. Premise round
 
-Open with the premise before anything else: what prompted this, what goes wrong today without it, and whether doing nothing (or something smaller) would be enough. A weak premise ends the session here, and that counts as a good outcome.
+Open with the premise before anything else: what prompted this, what goes wrong today without it, and whether doing nothing (or something smaller) would be enough. A weak premise ends the session here, and that counts as a good outcome: set the brief's `Status:` to `dropped (<the owner's reason>)` so `/spec` will not pick it up.
 
 ## 3. Grilling rounds
 
@@ -46,6 +46,7 @@ Rewrite the brief silently after each round. Do not show it unless asked. Format
 
 ```markdown
 # <feature>
+Status: open | ready | dropped (<reason>)
 ## Premise
 ## Problem
 ## Who
@@ -69,4 +70,4 @@ The grilling is done when every section from Premise to Success holds an answer 
 
 1. Restate the idea in five lines or fewer: problem, goals, non-goals, scope, success.
 2. Ask the owner to confirm it.
-3. After they confirm, say it is ready for `/spec` and stop. The owner starts `/spec` themselves.
+3. After they confirm, set the brief's `Status:` to `ready`, say it is ready for `/spec`, and stop. The owner starts `/spec` themselves.
