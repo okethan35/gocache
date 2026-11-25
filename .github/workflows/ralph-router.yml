@@ -14,7 +14,7 @@ on:
   pull_request_target: # base-branch copy of this file, so a PR cannot change it
     types: [closed]
   workflow_run: # CI finished: a queued review may now be ready (rule 32)
-    workflows: [ci]
+    workflows: [ci] # must be the `name:` of the repo's CI workflow (SETUP.md)
     types: [completed]
   schedule:
     - cron: "*/30 * * * *"
@@ -41,7 +41,7 @@ jobs:
         run: python3 .claude/ralph/reconcile.py
         env:
           GH_TOKEN: ${{ github.token }}
-          WRITER_ROUTINE_ID: ${{ vars.RALPH_WRITER_ROUTINE_ID || 'trig_013SJZmeYLqepkXVjWkvUp2x' }}
-          REVIEWER_ROUTINE_ID: ${{ vars.RALPH_REVIEWER_ROUTINE_ID || 'trig_01B1EwdffbysMKcefKhQukcR' }}
+          WRITER_ROUTINE_ID: ${{ vars.RALPH_WRITER_ROUTINE_ID }} # set by .claude/ralph/bootstrap.sh
+          REVIEWER_ROUTINE_ID: ${{ vars.RALPH_REVIEWER_ROUTINE_ID }}
           WRITER_TOKEN: ${{ secrets.RALPH_WRITER_FIRE_TOKEN }}
           REVIEWER_TOKEN: ${{ secrets.RALPH_REVIEWER_FIRE_TOKEN }}
