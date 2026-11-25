@@ -38,7 +38,7 @@ Work on the first issue you claim. If you claim none, print "No eligible issue" 
 
 ## Step 2: Read the issue
 
-Read the body and all comments (`gh api "$R/issues/N/comments?per_page=100"`). The body gives the goal, spec section, files to touch, gate commands, and what is out of scope. `## Reviewer pass` comments list findings you must fix on this run. Owner decisions (see Conventions) override the body.
+Read the body and all comments (`gh api "$R/issues/N/comments?per_page=100"`). The body gives the goal, spec section, files to touch, gate commands, and what is out of scope. `## Reviewer pass` comments list findings you must fix on this run. Owner decisions (see Conventions) override the body. An `## Approach` section holds hypotheses from earlier failed attempts: follow it unless a different approach passes every gate and holds up, and report which in Step 10.
 
 ## Step 3: Branch
 
@@ -86,6 +86,7 @@ Post one comment:
 **Gate tests:** PASS, or FAIL with details
 **Sanity check:** PASS, or the failures outside the touched packages
 **What I did:** one paragraph. List each reviewer finding and owner decision this run addressed, and how.
+**Approach:** followed, or departed: what you did instead and why (only when the issue has an `## Approach` section)
 ```
 
 Add `needs-review`, then remove `in-progress`. Adding `needs-review` is what starts the reviewer (a GitHub Action routes label changes to routines); you never start other runs yourself.

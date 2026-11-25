@@ -14,6 +14,7 @@ Argument: the SPEC.md section (heading or phase name). If none is given, ask whi
 - The named SPEC.md section, all of it. Number every rule if the spec numbers them; reuse those numbers.
 - CLAUDE.md (conventions, package boundaries, testing philosophy).
 - The code the section touches, enough to know which files each rule lands in.
+- LESSONS.md: every entry for this section or its files. Turn each lesson into a required test case or a scope line in the drafts it affects.
 - Open issues, for overlap: `gh issue list --state open --limit 100 --json number,title,labels,body`.
 
 ## 2. Slice
