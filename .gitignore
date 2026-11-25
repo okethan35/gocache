@@ -1,0 +1,9 @@
+# Secrets and keys (Ralph Loop spec rule 11)
+.env
+.env.*
+*.pem
+*.key
+id_*
+
+# Local Claude Code settings
+.claude/settings.local.json
