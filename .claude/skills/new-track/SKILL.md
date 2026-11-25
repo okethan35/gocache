@@ -1,6 +1,8 @@
 ---
 name: new-track
 description: Break an already-written SPEC.md section into small Ralph Loop GitHub issues, check them for file overlap with open work, and after one confirmation publish them (the ralph-loop label starts the writers). Use when the owner says /new-track, "queue this phase", or "turn this spec section into issues".
+disable-model-invocation: true
+argument-hint: <SPEC.md section>
 ---
 
 # /new-track

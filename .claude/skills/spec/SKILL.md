@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Turn a grilled idea into an owner-approved SPEC.md section: explore the codebase for collisions, settle edge cases, write the text on approval. Second step of /grill -> /spec -> /new-track.
+description: "Turn a grilled idea into an owner-approved SPEC.md section: explore the codebase for collisions, settle edge cases, write the text on approval. Second step of /grill -> /spec -> /new-track."
 disable-model-invocation: true
 argument-hint: [feature or brief path]
 ---
