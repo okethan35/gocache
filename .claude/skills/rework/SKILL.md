@@ -44,7 +44,7 @@ Talk it through with the owner. The owner decides; you argue for what the eviden
 - **rethink**: the exact SPEC text, and for each dependent whether it is kept, reworked later, or folded into the new track.
 - **shelve**: the reason.
 
-For reissue, split and rethink, also agree the `## Approach` hypotheses and the required test cases (format in [outcomes.md](outcomes.md)), and each new issue's **base**. The default is fresh from `main`. **Carry-over** (the new writer starts from the old branch's code) fits only when the reviewer confirmed the production code is correct and the gap is in the tests; otherwise the writer inherits the code that failed. A writer only finds a branch named `issue-<its own number>-*`, so carry-over always goes through the carry-over rule in outcomes.md, never through an instruction in the issue body.
+For reissue, split and rethink, also agree the `## Approach` hypotheses and the required test cases (format in [outcomes.md](outcomes.md)), and each new issue's **base**. The default is fresh from the default branch. **Carry-over** (the new writer starts from the old branch's code) fits only when the reviewer confirmed the production code is correct and the gap is in the tests; otherwise the writer inherits the code that failed. A writer only continues a branch named exactly `issue-<its own number>`, so carry-over always goes through the carry-over rule in outcomes.md, never through an instruction in the issue body.
 
 Then show everything phase 3 will do: each new issue body in full (for a reissue, as a diff against the old body), every dependent edit, every close, and the LESSONS entry. Ask once: go, or edit. Apply edits and show the changed parts again.
 

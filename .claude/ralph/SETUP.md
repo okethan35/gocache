@@ -32,7 +32,7 @@ Requirements: `bash`, `git`, `python3` (or `python`) and `gh`, locally and in th
 
 Copy everything in the table into the new repository, then add:
 
-- `.gitignore`: `.env`, `.env.*`, `*.pem`, `*.key`, `id_*`, `.claude/settings.local.json`, `__pycache__/`
+- `.gitignore`: `.env`, `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `id_dsa*`, `credentials.json`, `.claude/settings.local.json`, `__pycache__/`
 - `.gitattributes`: `*.sh text eol=lf` (without it, Windows checkouts break the hook)
 - `CLAUDE.md`: your project's conventions, plus this pointer:
 
@@ -59,6 +59,10 @@ Copy everything in the table into the new repository, then add:
 ## 3. CI
 
 The repository needs a workflow whose `name:` is `ci`, with a job named the same as `config.ci_check`. Copy `.github/workflows/ci.yml` and replace only the steps under the job with your language's setup and tests. Keep `permissions: contents: read`, pin actions to commit SHAs, and trigger on `pull_request` plus `push` to the default branch only.
+
+## 3b. Commit and merge to the default branch
+
+Commit all of the above and get it onto the default branch (a direct push is fine in a brand-new repository with no ruleset yet). The bootstrap refuses to run until `ralph-guard.yml`, `ralph-router.yml` and `config.json` are there, because it makes `ralph-guard` a required check and that check only runs once its workflow is on the default branch.
 
 ## 4. Manual steps (cannot be scripted)
 

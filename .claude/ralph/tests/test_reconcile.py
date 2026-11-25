@@ -254,12 +254,55 @@ class ReviewerCI(unittest.TestCase):
         self.assertEqual(gh.labels(1), {L["review_queued"]})
         self.assertTrue(any("waiting for" in l for l in rec.lines))
 
-    def test_slug_branch_still_matches(self):
+    def test_slug_branch_ignored(self):
+        """Rule 40: only exactly issue-<n> counts (this replaced a transitional slug test)."""
         gh = FakeGitHub()
-        gh.add(24, [L["review_queued"]])
+        gh.add(24, [L["review_queued"]], events=[labeled(L["review_queued"], 0.1)])
         gh.add_pr(24, ref="issue-24-expire-persist-wir")
         _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [])
+
+    def test_exact_branch_matches_even_with_old_slug_pr(self):
+        gh = FakeGitHub()
+        gh.add(24, [L["review_queued"]])
+        gh.add_pr(24, sha="old0001", ref="issue-24-expire-persist-wir")
+        gh.add_pr(24, sha="new0002", ref="issue-24")
+        _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [("R", 24)])
+
+
+class Robustness(unittest.TestCase):
+    def test_raising_fire_reverts_claim_and_continues(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["queued"]])
+        gh.add(2, [L["queued"]])
+
+        def boom(routine_id, token, n):
+            if n == 1:
+                raise ConnectionResetError("peer reset")
+            return True, "HTTP 200"
+        rec = rc.Reconciler(CFG, gh, NOW, boom, {"writer": ("W", "t"), "reviewer": ("R", "t")})
+        self.assertEqual(rec.run(), 1)
+        self.assertEqual(gh.labels(1), {L["queued"]})
+        self.assertEqual(gh.labels(2), {L["writing"]})
+        self.assertTrue(any("ConnectionResetError" in l for l in rec.lines))
+
+    def test_one_broken_issue_does_not_stop_the_rest(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["human"]])
+        gh.add(2, [L["queued"]])
+        real_lock = gh.lock
+
+        def flaky_lock(n):
+            if n == 1:
+                raise RuntimeError("API 502")
+            return real_lock(n)
+        gh.lock = flaky_lock
+        rec, fires, code = run(gh)
+        self.assertEqual(code, 1)
+        self.assertEqual(gh.locked, [2])  # issue 1 failed first, issue 2 was still locked
+        self.assertEqual(fires.calls, [("W", 2)])
+        self.assertTrue(any("#1: ERROR" in l for l in rec.lines))
 
     def test_fork_pr_ignored(self):
         gh = FakeGitHub()

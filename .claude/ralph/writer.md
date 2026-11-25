@@ -78,4 +78,6 @@ Post one comment:
 **Approach:** followed, or departed: what you did instead and why (only when the issue has an `## Approach` section)
 ```
 
+Right before posting it, re-read the labels (`gh api $R/issues/N --jq '[.labels[].name]'`). If `WRITING` is gone, your claim expired and another run may own the issue: stop without posting or moving labels.
+
 Then move N to `REVIEW_QUEUED` (rule 46). That lets the reconciler start the reviewer once CI has finished; you never start other runs yourself.

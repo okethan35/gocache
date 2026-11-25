@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
@@ -89,7 +90,7 @@ class GitHub:
         return [i for i in items if "pull_request" not in i]
 
     def closed_issues_with_label(self, label):
-        items = self._paged(f"repos/{self.repo}/issues?state=closed&labels={label}&per_page=100")
+        items = self._paged(f"repos/{self.repo}/issues?state=closed&labels={urllib.parse.quote(label)}&per_page=100")
         return [i for i in items if "pull_request" not in i]
 
     def issue(self, n):
@@ -105,7 +106,7 @@ class GitHub:
         return self._paged(f"repos/{self.repo}/pulls?state=open&per_page=100")
 
     def check_runs(self, sha, name):
-        out = self._api([f"repos/{self.repo}/commits/{sha}/check-runs?check_name={name}&per_page=100"])
+        out = self._api([f"repos/{self.repo}/commits/{sha}/check-runs?check_name={urllib.parse.quote(name)}&per_page=100"])
         return out.get("check_runs", [])
 
     def lock(self, n):
@@ -147,8 +148,8 @@ def fire(routine_id, token, issue_number):
             return True, f"HTTP {resp.status}"
     except urllib.error.HTTPError as e:
         return False, f"HTTP {e.code}: {e.read().decode(errors='replace')[:500]}"
-    except (urllib.error.URLError, TimeoutError) as e:
-        return False, f"request failed: {e}"
+    except Exception as e:  # rule 31: any failure (reset, disconnect, timeout) is a failed fire
+        return False, f"request failed: {type(e).__name__}: {e}"
 
 
 # ---------- pure helpers ----------
@@ -288,7 +289,10 @@ class Reconciler:
         before = label_names(issue)
         self.relabel(issue, claim_label)
         routine_id, token = self.routines.get(role, (None, None))
-        ok, detail = self.fire_fn(routine_id, token, n)
+        try:
+            ok, detail = self.fire_fn(routine_id, token, n)
+        except Exception as e:  # never leave a claim behind without a run
+            ok, detail = False, f"{type(e).__name__}: {e}"
         if ok:
             self.log(f"#{n}: claimed `{claim_label}`, fired {role} ({detail})")
             return True
@@ -328,7 +332,7 @@ class Reconciler:
             # two live claims at once: left for report_stuck
 
     def pr_for(self, n, pulls):
-        pat = re.compile(rf"issue-{n}(?:-[a-z0-9-]+)?")
+        pat = re.compile(rf"issue-{n}")  # rule 40: exactly issue-<n>
         found = [p for p in pulls
                  if pat.fullmatch(p["head"]["ref"]) and (p["head"].get("repo") or {}).get("full_name") == self.cfg["repo"]]
         return (found[0] if len(found) == 1 else None), len(found)
@@ -437,7 +441,7 @@ class Reconciler:
                 try:
                     bi = self.gh.issue(b)
                     done = bi.get("state") == "closed" and bi.get("state_reason") == "completed"
-                except RuntimeError:
+                except Exception:
                     done = False
                 if not done:
                     open_blockers.append(f"#{b}")
@@ -447,21 +451,34 @@ class Reconciler:
             if active >= cap:
                 self.log(f"#{n}: eligible, waiting (writer cap {cap} reached)")
                 continue
-            if self.too_many_writer_runs(issue):
-                continue
-            if self.claim_and_fire(issue, self.L["writing"], "writer"):
-                active += 1
+            try:
+                if self.too_many_writer_runs(issue):
+                    continue
+                if self.claim_and_fire(issue, self.L["writing"], "writer"):
+                    active += 1
+            except Exception as e:
+                self.log(f"#{n}: ERROR while claiming: {type(e).__name__}: {e}")
+                self.failed = True
+
+    def each(self, step, issues):
+        """Run one step per issue, so a failure on one issue cannot stop the others."""
+        for issue in issues:
+            try:
+                step([issue])
+            except Exception as e:
+                self.log(f"#{issue.get('number')}: ERROR in {step.__name__}: {type(e).__name__}: {e}")
+                self.failed = True
 
     def run(self):
         self.strip_closed()
         issues = self.gh.open_issues()
-        self.lock_loop_issues(issues)
-        self.release_stale(issues)
-        self.apply_requeues(issues)
-        self.claim_reviewers(issues)
-        self.claim_writers(issues)
-        self.notify_owner(issues)
-        self.report_stuck(issues)
+        self.each(self.lock_loop_issues, issues)
+        self.each(self.release_stale, issues)
+        self.each(self.apply_requeues, issues)
+        self.each(self.claim_reviewers, issues)
+        self.claim_writers(issues)  # needs the whole list for the cap; guarded per issue inside
+        self.each(self.notify_owner, issues)
+        self.each(self.report_stuck, issues)
         if not self.lines:
             self.log("nothing to do")
         return 1 if self.failed else 0
@@ -497,8 +514,8 @@ def main(argv=()):
     rec = Reconciler(cfg, GitHub(cfg["repo"], dry_run), datetime.now(timezone.utc), fire_fn, routines)
     try:
         code = rec.run()
-    except RuntimeError as e:
-        rec.log(f"ERROR: {e}")
+    except Exception as e:
+        rec.log(f"ERROR: {type(e).__name__}: {e}")
         code = 1
     write_summary(rec.lines)
     return code

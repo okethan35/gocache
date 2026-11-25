@@ -187,6 +187,29 @@ def posts_comment(toks):
     )
 
 
+RAW_MERGE = re.compile(r"\bgh\s+(?:(?:-R|--repo)[\s=]+\S+\s+)?pr\s+merge\b|pulls/[^\s/]*/+merge\b|mergePullRequest|enablePullRequestAutoMerge", re.I)
+
+
+def check_raw(command):
+    """Rule 13 on the raw text, so wrappers (bash -c, $(...), eval, env, xargs) cannot hide a merge."""
+    if RAW_MERGE.search(command):
+        raise Blocked(13, "agents never merge PRs; the owner merges in the GitHub UI")
+
+
+def input_bodies(toks, cwd):
+    """`gh api --input FILE` bodies, so a JSON payload cannot hide a Decision."""
+    out = []
+    for i, t in enumerate(toks):
+        path = toks[i + 1] if t == "--input" and i + 1 < len(toks) else (t.split("=", 1)[1] if t.startswith("--input=") else None)
+        if path and path != "-":
+            try:
+                body = json.loads(read_text(path, cwd) or "{}").get("body", "")
+                out.append(body if isinstance(body, str) else "")
+            except (ValueError, AttributeError):
+                pass
+    return out
+
+
 def check_every_session(toks, cwd):
     """Rule 13: active locally and in the cloud."""
     joined = " ".join(toks)
@@ -195,7 +218,7 @@ def check_every_session(toks, cwd):
     if re.search(rf"pulls/{NUM}/merge\b", joined):
         raise Blocked(13, "agents never call the PR merge API")
     if posts_comment(toks):
-        for body in comment_bodies(toks, cwd):
+        for body in comment_bodies(toks, cwd) + input_bodies(toks, cwd):
             if body.lstrip().startswith(DECISION):
                 raise Blocked(13, f"agents never post a comment starting with {DECISION}")
 
@@ -268,6 +291,7 @@ def check_cloud_only(toks, cfg, cwd):
 
 
 def check_bash(command, cfg, cwd, remote):
+    check_raw(command)
     for seg in split_segments(command):
         toks = tokens(seg)
         # Skip leading env assignments such as FOO=bar gh ...
@@ -310,7 +334,7 @@ def hook_main(stdin_text, env):
     root = env.get("CLAUDE_PROJECT_DIR") or (_run(["git", "rev-parse", "--show-toplevel"], cwd=cwd) or cwd).strip()
     remote = env.get("CLAUDE_CODE_REMOTE") == "true"
     cfg = load_config(root)
-    if tool == "Bash":
+    if tool in ("Bash", "PowerShell"):  # PowerShell runs the same gh and git commands on Windows
         check_bash(tool_input.get("command", ""), cfg, cwd, remote)
     elif tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
         check_file_tool(tool_input, cfg, root, remote)
@@ -387,9 +411,13 @@ def pr_main():
     repo = os.environ["GITHUB_REPOSITORY"]
     with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as f:
         pr = json.load(f)["pull_request"]
-    cfg = load_config(os.getcwd())  # base branch checkout
+    cfg = load_config(os.getcwd())  # default-branch checkout
+    failures = []
+    default = cfg.get("default_branch") or "main"
+    if pr["base"]["ref"] != default:  # rule 17: only PRs into the default branch are judged
+        failures.append(f"base branch is {pr['base']['ref']!r}; ralph-guard only passes PRs into {default!r}")
     files = gh_json(f"repos/{repo}/pulls/{pr['number']}/files?per_page=100")
-    failures = check_pr_files(pr["head"]["ref"], files, cfg)
+    failures += check_pr_files(pr["head"]["ref"], files, cfg)
 
     sha = pr["head"]["sha"]
     tree = json.loads(subprocess.run(

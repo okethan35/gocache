@@ -59,6 +59,19 @@ EOF
 
 # ---- 2. Ruleset on the default branch (rule 16) --------------------------
 step "Ruleset"
+# The ruleset makes ralph-guard required. It only runs once its workflow is on the default
+# branch, so applying the ruleset earlier would leave every PR waiting on a check that never
+# runs. Refuse until the loop files are merged.
+DEFAULT_BRANCH="$(cfg default_branch)"
+missing=""
+for f in .github/workflows/ralph-guard.yml .github/workflows/ralph-router.yml .claude/ralph/config.json; do
+  gh api "repos/$REPO/contents/$f?ref=$DEFAULT_BRANCH" --silent 2>/dev/null || missing="$missing $f"
+done
+if [ -n "$missing" ]; then
+  echo "  STOP    not on '$DEFAULT_BRANCH' yet:$missing"
+  echo "          Commit the loop files and merge them to '$DEFAULT_BRANCH' first (SETUP.md step 3b), then rerun."
+  exit 1
+fi
 RULESET_NAME="Ralph Loop: default branch"
 desired="$("$PY" - "$RULESET_NAME" "$CI_CHECK" <<'EOF'
 import json, sys
