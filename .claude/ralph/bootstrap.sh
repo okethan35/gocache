@@ -84,7 +84,8 @@ print(json.dumps({
 EOF
 )"
 rid="$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name==\"$RULESET_NAME\") | .id" | head -1)"
-tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+# Temp file inside .git/: a relative path that both bash and a native Windows gh.exe can read.
+tmp="$(mktemp "$(git rev-parse --git-dir)/ralph-bootstrap.XXXXXX")"; trap 'rm -f "$tmp"' EXIT
 printf '%s' "$desired" > "$tmp"
 if [ -n "$rid" ]; then
   echo "  update  '$RULESET_NAME' (id $rid)"
