@@ -7,3 +7,6 @@ id_*
 
 # Local Claude Code settings
 .claude/settings.local.json
+
+# Python bytecode (guard tests)
+__pycache__/
