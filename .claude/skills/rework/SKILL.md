@@ -23,7 +23,7 @@ Gather everything first (`gh issue`, `gh pr` and `gh api` all work here):
 - The **lineage**: follow `**Supersedes:** #M` lines back to the root issue, and read each ancestor's LESSONS.md entry. If a descendant's writer summary reports `**Approach:** departed`, and its entry has no departure note yet, offer to add one in phase 3.
 - **Dependents**: open issues whose `**Blocked by:**` line names this issue, with their labels.
 
-In parallel, dispatch one Explore subagent (very thorough) on the code the issue touches: its state on main and on the issue branch, how neighbouring code and tests already solve the same problem (tests a writer could model on), and anything in the codebase that makes the ask hard. Ask for a summary with file:line references, not file dumps.
+When there is failed work to diagnose (not for an LGTM or merged issue), dispatch one Explore subagent (very thorough) in parallel on the code the issue touches: its state on main and on the issue branch, how neighbouring code and tests already solve the same problem (tests a writer could model on), and anything in the codebase that makes the ask hard. Ask for a summary with file:line references, not file dumps.
 
 Then report to the owner, in this order:
 1. **Path.** How the issue got here: the 2-round cap, a reviewer ESCALATE, a `## Writer escalation`, still in the loop, or LGTM. Never refuse; advise. An LGTM issue probably means the wrong number, so say so. A claimed issue (`in-progress` or `in-review`): say which agent holds it and since when, and that phase 3 waits for the claim to clear. An escalation: say whether one `**Decision:**` comment plus re-queueing would be enough on its own.
@@ -42,7 +42,7 @@ Talk it through with the owner. The owner decides; you argue for what the eviden
 - **rethink**: the exact SPEC.md text, and for each dependent whether it is kept, reworked later, or folded into the new track.
 - **shelve**: the reason.
 
-For reissue, split and rethink, also agree the `## Approach` hypotheses and the required test cases (format in [outcomes.md](outcomes.md)).
+For reissue, split and rethink, also agree the `## Approach` hypotheses and the required test cases (format in [outcomes.md](outcomes.md)), and each new issue's **base**. The default is fresh from `main`. **Carry-over** (the new writer starts from the old branch's code) fits only when the reviewer confirmed the production code is correct and the gap is in the tests; otherwise the writer inherits the code that failed. A writer only finds a branch named `issue-<its own number>-*`, so carry-over always goes through the carry-over rule in outcomes.md, never through an instruction in the issue body.
 
 Then show everything phase 3 will do: each new issue body in full (for a reissue, as a diff against the old body), every dependent edit, every close, and the LESSONS.md entry. Ask once: go, or edit. Apply edits and show the changed parts again.
 

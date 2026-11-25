@@ -22,6 +22,13 @@ Phase 3 of [SKILL.md](SKILL.md). Apply the shared rules, then the chosen outcome
 
 Publish in blocker order with `gh issue create --title T --body-file F --label ralph-loop`, replacing `T1`, `T2`, ... with real numbers as they are created.
 
+**Carry-over**, for an issue whose agreed base is the old branch. The `ralph-loop` label fires a writer at once, so the branch must exist before the label does:
+1. Create the issue without `--label`.
+2. Push the old branch's head under the new number: `git fetch origin OLD_BRANCH && git push origin FETCH_HEAD:refs/heads/issue-NEW-SLUG` (SLUG from the title: lowercase, hyphens, max 20 chars).
+3. Add the label: `gh issue edit NEW --add-label ralph-loop`.
+
+The writer finds the branch in its Step 3, merges `main` into it, and opens a new PR. In a split, only the piece the owner named carries over.
+
 **Dependents.** Edit a dependent only while it carries no `in-progress`, `needs-review` or `in-review` label. For one that does, list it to the owner and leave it alone. Edit bodies with `gh issue edit N --body-file F`.
 
 **Pausing a dependent.** Remove `ralph-loop` (writers only take `ralph-loop` issues) and comment `Paused: blocked by #OLD, which is being reworked. Re-add ralph-loop once its replacement is settled.`
