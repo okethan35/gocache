@@ -56,7 +56,7 @@ Run every command in `config.gates`, in order, exactly as written (rule 42). On 
 
 1. Stage each in-scope file by name: `git add <file> ...`. Never `git add -A`, `git add .`, or `git commit -a`.
 2. Check what will actually be committed (rule 43): `git diff --cached --name-only` and `git status --porcelain` must show no protected path. If one appears, unstage it (`git restore --staged <file>`) and revert it; never commit it.
-3. `git commit -m "issue-N: ISSUE_TITLE"` (the issue's title, exactly).
+3. If nothing is staged and `git rev-list --count origin/issue-N..HEAD` is 0 (or the branch is new and has no commits beyond `origin/MAIN`), you produced no change. If a trusted reviewer finding is still open, post a `## Writer escalation` that names the finding and why you could not change the code, move N to `HUMAN`, and stop; never hand off an unchanged branch (rule 46). Otherwise `git commit -m "issue-N: ISSUE_TITLE"` (the issue's title, exactly).
 4. Right before pushing, confirm the issue is still open (rule 44): `gh api $R/issues/N --jq .state` must print `open`. If it does not, stop without pushing.
 5. `git push -u origin issue-N`. If rejected, fetch, merge `origin/issue-N`, rerun the gates, and push again. Never force-push. Never push to `MAIN`.
 

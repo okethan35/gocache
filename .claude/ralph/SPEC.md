@@ -36,7 +36,7 @@ Applies to any repository that uses the loop. Per-repository values live in `.cl
 25. The second consecutive stale claim on the same issue moves it to `labels.human` with the comment "two runs expired without a hand-off".
 26. An issue is writer-eligible when it is open, carries `labels.queued` and no other loop label, has a `**Blocked by:**` line, and every blocker it names is closed with `state_reason` `completed`.
 27. An issue with `labels.queued` and a missing or unparseable `**Blocked by:**` line is not claimed, and is listed in the summary as "needs a Blocked by line". `**Blocked by:** none` is valid.
-28. Writers are claimed oldest first until open `labels.writing` issues equal `max_writers`.
+28. Writers are claimed oldest first until open `labels.writing` issues equal `max_writers`. Before claiming, the reconciler counts the `labels.writing` labeled events since the later of the latest valid Decision and the latest `labels.human` label. If there are more than `2 × max_review_rounds + 1`, it moves the issue to `labels.human` with the comment "too many writer runs without reaching the owner" instead of claiming it.
 29. Every label change is one call that sets the issue's full label set.
 30. The reconciler fires a routine only for an issue it has just claimed, with the issue number as the whole payload.
 31. If a fire fails, the reconciler reverts that claim, prints the response body, and fails the job.
@@ -56,7 +56,7 @@ Applies to any repository that uses the loop. Per-repository values live in `.cl
 43. Before committing, `git diff --cached --name-only` and `git status --porcelain` must show nothing under `protected_paths`. Staging is per file, never `-A`, `.` or `commit -a`.
 44. Right before pushing, the writer confirms the issue is still open. If it is closed, the run stops without pushing.
 45. Commit message is `issue-<n>: <issue title>`. PR title is the issue title, and the body starts with `Closes #<n>`.
-46. Hand-off: post the `## Writer summary`, then set the labels to `labels.review_queued` in one call.
+46. Hand-off: post the `## Writer summary`, then set the labels to `labels.review_queued` in one call. If there is nothing to commit while a trusted reviewer finding is still open, the writer posts a `## Writer escalation` instead of handing off.
 47. A run that dies is recovered by rule 24. Its branch is kept, and the next writer continues from it. A dead run does not count as a review round.
 
 ## 6. Reviewer
@@ -65,7 +65,7 @@ Applies to any repository that uses the loop. Per-repository values live in `.cl
 50. The reviewer reads CLAUDE.md and `config.spec_file` from `origin/<default_branch>`, never from the PR checkout.
 51. The reviewer runs `config.gates`, the falsifiability check for each new or changed test, the scope check, and the CI check. CI passes only when every `config.ci_check` run on the head commit completed with `success`.
 52. Finding categories: spec gaps, unfalsifiable tests, logic bugs, CLAUDE.md invariant violations, scope violations, merge conflicts, CI failures.
-53. Round number = the number of distinct head SHAs among trusted `## Reviewer pass` comments posted since the latest valid Decision, plus one if the current head SHA is new.
+53. Round number = the number of distinct head SHAs among trusted `## Reviewer pass` comments posted since the latest valid Decision, plus one if the current head SHA is new. If `SHA` equals the SHA of the latest trusted pass and a trusted `## Writer summary` was posted after that pass, the writer produced no new commit: the verdict is D, with `Escalating: the writer produced no new commit.`
 54. The verdict rules are as today, with the cap at `max_review_rounds`. Each verdict is one comment followed by one label-set call.
 
 ## 7. Skills
