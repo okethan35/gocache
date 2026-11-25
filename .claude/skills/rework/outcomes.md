@@ -4,7 +4,7 @@ Phase 3 of [SKILL.md](SKILL.md). Apply the shared rules, then the chosen outcome
 
 ## Shared rules
 
-**Order.** A merged spec change (rethink only) comes first, then new issues, then dependent edits, then closing the old issue and PR, then the LESSONS entry. Closing the old issue any earlier unblocks its dependents: the writer treats any closed blocker as done.
+**Order.** A merged spec change (rethink only) comes first, then new issues, then dependent edits, then closing the old issue and PR, then the LESSONS entry. Closing the old issue any earlier can unblock its dependents: the reconciler treats a blocker closed as completed as done (closing as "not planned", as this skill does, keeps them blocked, but a merged PR with `Closes #OLD` would not).
 
 **New issues.** Draft with `/new-track`'s issue template (`.claude/skills/new-track/SKILL.md`, "Draft each issue") and run its overlap check ("Check overlap"), leaving the old issue out of the overlap check: it shares every file by design. Add to each:
 - `**Supersedes:** #OLD` on the line after `**Blocked by:**`.
@@ -31,7 +31,7 @@ The writer finds the branch in its Step 3, merges `MAIN` into it, and opens a ne
 
 **Dependents.** Edit a dependent only while it carries no `WRITING`, `REVIEW_QUEUED` or `REVIEWING` label. For one that does, list it to the owner and leave it alone, and do not close the old issue until the owner decides what happens to it (rule 58): closing the old issue would unblock it while it still points at the failed work. Edit bodies with `gh issue edit N --body-file F`.
 
-**Pausing a dependent.** Remove `QUEUED` (the reconciler only starts `QUEUED` issues) and comment `Paused: blocked by #OLD, which is being reworked. Re-add QUEUED once its replacement is settled.` If the removal returns 404, the reconciler just claimed it: tell the owner.
+**Pausing a dependent.** Remove `QUEUED` (the reconciler only starts `QUEUED` issues) and comment `Paused: blocked by #OLD, which is being reworked. Re-add QUEUED once its replacement is settled.` Re-read its labels first: if it already carries `WRITING`, the reconciler just claimed it, so leave it and tell the owner.
 
 **Closing.** `gh issue close OLD --reason "not planned" --comment "<outcome line>"`. Close the old PR with `gh pr close P --comment "Superseded: see #OLD."` and keep its branch.
 

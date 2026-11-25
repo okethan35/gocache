@@ -35,6 +35,12 @@ run() { if [ "$DRY" = 1 ]; then echo "  [dry-run] $*"; else "$@"; fi; }
 step() { echo; echo "== $*"; }
 
 echo "Ralph Loop bootstrap for $REPO$([ "$DRY" = 1 ] && echo ' (dry run)')"
+here="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)"
+if [ -n "$here" ] && [ "$here" != "$REPO" ]; then
+  echo "bootstrap: config.json says repo '$REPO' but this checkout is '$here'." >&2
+  echo "           Edit owner and repo in $CONFIG first (SETUP.md step 2)." >&2
+  exit 1
+fi
 perm="$(gh api "repos/$REPO" --jq '.permissions.admin' 2>/dev/null || echo false)"
 [ "$perm" = "true" ] || { echo "bootstrap: your gh login is not an admin of $REPO" >&2; exit 1; }
 
@@ -59,6 +65,19 @@ EOF
 
 # ---- 2. Ruleset on the default branch (rule 16) --------------------------
 step "Ruleset"
+# The ruleset makes ralph-guard required. It only runs once its workflow is on the default
+# branch, so applying the ruleset earlier would leave every PR waiting on a check that never
+# runs. Refuse until the loop files are merged.
+DEFAULT_BRANCH="$(cfg default_branch)"
+missing=""
+for f in .github/workflows/ralph-guard.yml .github/workflows/ralph-router.yml .claude/ralph/config.json; do
+  gh api "repos/$REPO/contents/$f?ref=$DEFAULT_BRANCH" --silent 2>/dev/null || missing="$missing $f"
+done
+if [ -n "$missing" ]; then
+  echo "  STOP    not on '$DEFAULT_BRANCH' yet:$missing"
+  echo "          Commit the loop files and merge them to '$DEFAULT_BRANCH' first (SETUP.md step 3b), then rerun."
+  exit 1
+fi
 RULESET_NAME="Ralph Loop: default branch"
 desired="$("$PY" - "$RULESET_NAME" "$CI_CHECK" <<'EOF'
 import json, sys

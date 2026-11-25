@@ -77,6 +77,8 @@ Classify each:
 
 ## Step 6: Verdict
 
+First re-read the labels (`gh api $R/issues/N --jq '[.labels[].name]'`). If `REVIEWING` is gone, your claim expired and another run may own the issue: stop without posting or moving labels.
+
 Post exactly one comment beginning:
 
 ```

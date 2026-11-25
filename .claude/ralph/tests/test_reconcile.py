@@ -14,6 +14,7 @@ import reconcile as rc  # noqa: E402
 NOW = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc)
 CFG = json.load(open(os.path.join(os.path.dirname(HERE), "config.json"), encoding="utf-8"))
 L = CFG["labels"]
+OWNER = CFG["owner"]
 
 
 def ts(hours_ago):
@@ -70,8 +71,9 @@ class FakeGitHub:
     def check_runs(self, sha, name):
         return self.runs.get(sha, [])
 
-    def add_pr(self, n, sha="abc1234", ref=None, repo="okethan35/gocache", runs=("completed",)):
+    def add_pr(self, n, sha="abc1234", ref=None, repo=None, runs=("completed",)):
         ref = ref or f"issue-{n}"
+        repo = repo or CFG["repo"]
         self.pulls.append({"head": {"ref": ref, "sha": sha, "repo": {"full_name": repo}},
                            "html_url": f"https://github.com/{repo}/pull/{100 + n}"})
         self.runs[sha] = [{"status": st, "conclusion": "success" if st == "completed" else None} for st in runs]
@@ -231,7 +233,7 @@ class Stale(unittest.TestCase):
     def test_handoff_between_expiries_resets(self):
         gh = FakeGitHub()
         prior = {"user": {"login": rc.BOT}, "body": f"{rc.ROUTER_HEADER}\n{rc.EXPIRED_MARKER}\nreturned"}
-        summary = {"user": {"login": "okethan35"}, "body": "## Writer summary\n..."}
+        summary = {"user": {"login": OWNER}, "body": "## Writer summary\n..."}
         gh.add(1, [L["writing"]], events=[labeled(L["writing"], 3)], comments=[prior, summary])
         _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [("W", 1)])
@@ -254,17 +256,60 @@ class ReviewerCI(unittest.TestCase):
         self.assertEqual(gh.labels(1), {L["review_queued"]})
         self.assertTrue(any("waiting for" in l for l in rec.lines))
 
-    def test_slug_branch_still_matches(self):
+    def test_slug_branch_ignored(self):
+        """Rule 40: only exactly issue-<n> counts (this replaced a transitional slug test)."""
         gh = FakeGitHub()
-        gh.add(24, [L["review_queued"]])
+        gh.add(24, [L["review_queued"]], events=[labeled(L["review_queued"], 0.1)])
         gh.add_pr(24, ref="issue-24-expire-persist-wir")
         _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [])
+
+    def test_exact_branch_matches_even_with_old_slug_pr(self):
+        gh = FakeGitHub()
+        gh.add(24, [L["review_queued"]])
+        gh.add_pr(24, sha="old0001", ref="issue-24-expire-persist-wir")
+        gh.add_pr(24, sha="new0002", ref="issue-24")
+        _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [("R", 24)])
+
+
+class Robustness(unittest.TestCase):
+    def test_raising_fire_reverts_claim_and_continues(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["queued"]])
+        gh.add(2, [L["queued"]])
+
+        def boom(routine_id, token, n):
+            if n == 1:
+                raise ConnectionResetError("peer reset")
+            return True, "HTTP 200"
+        rec = rc.Reconciler(CFG, gh, NOW, boom, {"writer": ("W", "t"), "reviewer": ("R", "t")})
+        self.assertEqual(rec.run(), 1)
+        self.assertEqual(gh.labels(1), {L["queued"]})
+        self.assertEqual(gh.labels(2), {L["writing"]})
+        self.assertTrue(any("ConnectionResetError" in l for l in rec.lines))
+
+    def test_one_broken_issue_does_not_stop_the_rest(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["human"]])
+        gh.add(2, [L["queued"]])
+        real_lock = gh.lock
+
+        def flaky_lock(n):
+            if n == 1:
+                raise RuntimeError("API 502")
+            return real_lock(n)
+        gh.lock = flaky_lock
+        rec, fires, code = run(gh)
+        self.assertEqual(code, 1)
+        self.assertEqual(gh.locked, [2])  # issue 1 failed first, issue 2 was still locked
+        self.assertEqual(fires.calls, [("W", 2)])
+        self.assertTrue(any("#1: ERROR" in l for l in rec.lines))
 
     def test_fork_pr_ignored(self):
         gh = FakeGitHub()
         gh.add(1, [L["review_queued"]], events=[labeled(L["review_queued"], 0.1)])
-        gh.add_pr(1, repo="attacker/gocache")
+        gh.add_pr(1, repo="attacker/" + CFG["repo"].split("/")[1])
         _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [])
 
@@ -296,14 +341,14 @@ class Requeue(unittest.TestCase):
 class Notify(unittest.TestCase):
     def test_notifies_once(self):
         gh = FakeGitHub()
-        lgtm = {"user": {"login": "okethan35"}, "created_at": ts(0.2),
+        lgtm = {"user": {"login": OWNER}, "created_at": ts(0.2),
                 "body": "## Reviewer pass 1\n<!-- ralph:pass=1 sha=abc -->\n**PR:** x\n**Summary:**\n- a\n\nLGTM. Ready for human review."}
         gh.add(1, [L["human"]], events=[labeled(L["human"], 0.1)], comments=[lgtm])
         gh.add_pr(1)
         run(gh)
         notes = [b for b in gh.bot_comments(1) if rc.NOTIFIED_MARKER in b]
         self.assertEqual(len(notes), 1)
-        self.assertIn("@okethan35", notes[0])
+        self.assertIn("@" + OWNER, notes[0])
         self.assertIn("LGTM. Ready for human review.", notes[0])
         self.assertIn("/pull/101", notes[0])
         run(gh)
@@ -358,14 +403,14 @@ class WriterRunCap(unittest.TestCase):
 
     def test_decision_resets_count(self):
         gh = FakeGitHub()
-        dec = {"user": {"login": "okethan35"}, "created_at": ts(1), "updated_at": ts(1), "body": "**Decision:** try again"}
+        dec = {"user": {"login": OWNER}, "created_at": ts(1), "updated_at": ts(1), "body": "**Decision:** try again"}
         gh.add(1, [L["queued"]], events=self.runs(9), comments=[dec])
         _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [("W", 1)])
 
     def test_edited_decision_does_not_reset(self):
         gh = FakeGitHub()
-        dec = {"user": {"login": "okethan35"}, "created_at": ts(1), "updated_at": ts(0.5), "body": "**Decision:** try again"}
+        dec = {"user": {"login": OWNER}, "created_at": ts(1), "updated_at": ts(0.5), "body": "**Decision:** try again"}
         gh.add(1, [L["queued"]], events=self.runs(9), comments=[dec])
         _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [])

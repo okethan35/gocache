@@ -16,7 +16,7 @@ on:
     workflows: [ci] # must be the `name:` of the repo's CI workflow (SETUP.md)
     types: [completed]
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "17 * * * *" # hourly backstop (rule 21); events start runs immediately
   workflow_dispatch:
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
     # (rule 37), so a workflow run from any other branch cannot read them.
     environment: ralph
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: # issues, schedule and pull_request_target all check out the default branch
           persist-credentials: false
       - name: Reconcile

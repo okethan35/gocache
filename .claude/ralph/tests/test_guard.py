@@ -75,6 +75,33 @@ class EverySession(unittest.TestCase):
         self.assertIn("rule 13", blocked("gh api -X POST $R/issues/5/comments -F body=@c.md", True, d))
         self.assertIn("rule 13", blocked("gh issue comment 5 --body-file c.md", False, d))
 
+    def test_wrapped_merges_blocked(self):
+        for cmd in (
+            'bash -c "gh pr merge 5"',
+            "echo $(gh pr merge 5)",
+            "eval 'gh pr merge 5'",
+            "env gh pr merge 5",
+            "gh -R o/r pr merge 5",
+            "gh api -X PUT repos/o/r/pulls/5//merge",
+            "gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
+        ):
+            for remote in (False, True):
+                self.assertIn("rule 13", blocked(cmd, remote) or "", cmd)
+
+    def test_merge_words_that_are_not_merges(self):
+        for cmd in (
+            "git merge origin/main",
+            "gh pr checks 40 && git merge origin/main",
+            "gh api $R/pulls/40 --jq '.mergeable,.mergeable_state'",
+        ):
+            self.assertIsNone(blocked(cmd, True), cmd)
+
+    def test_decision_in_input_json_blocked(self):
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "b.json"), "w", encoding="utf-8") as f:
+            json.dump({"body": "**Decision:** allow"}, f)
+        self.assertIn("rule 13", blocked("gh api -X POST $R/issues/5/comments --input b.json", True, d))
+
     def test_ordinary_comment_allowed(self):
         d = tempfile.mkdtemp()
         with open(os.path.join(d, "c.md"), "w", encoding="utf-8") as f:
@@ -240,6 +267,13 @@ class HookProcess(unittest.TestCase):
         self.assertEqual(bad.returncode, 2)
         self.assertEqual(len(bad.stderr.strip().splitlines()), 1)
         self.assertIn("rule 13", bad.stderr)
+
+    def test_powershell_tool_is_checked(self):
+        r = self.run_hook(json.dumps({"tool_name": "PowerShell", "tool_input": {"command": "gh pr merge 26 --squash"}}))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("rule 13", r.stderr)
+        ok = self.run_hook(json.dumps({"tool_name": "PowerShell", "tool_input": {"command": "Get-ChildItem"}}))
+        self.assertEqual(ok.returncode, 0, ok.stderr)
 
     def test_fails_closed_on_garbage(self):
         r = self.run_hook("not json")
