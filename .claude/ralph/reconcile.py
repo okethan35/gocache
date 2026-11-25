@@ -180,6 +180,22 @@ def last_labeled_at(events, label):
     return max(times) if times else None
 
 
+def latest_decision_at(comments, owner):
+    """Rule 7: the created_at of the latest unedited owner `**Decision:**`, or None."""
+    times = [parse_time(c["created_at"]) for c in comments
+             if c.get("user", {}).get("login") == owner
+             and (c.get("body") or "").startswith("**Decision:**")
+             and c.get("created_at") and c.get("created_at") == c.get("updated_at", c.get("created_at"))]
+    return max(times) if times else None
+
+
+def writer_runs_since(events, writing_label, since):
+    """Rule 28: how many times the writer claim was applied after `since` (None = ever)."""
+    return sum(1 for e in events
+               if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == writing_label
+               and (since is None or parse_time(e["created_at"]) > since))
+
+
 def is_second_expiry(comments):
     """Rule 25: an expiry with no writer summary or reviewer pass since the previous expiry."""
     last_expiry = None
@@ -317,6 +333,23 @@ class Reconciler:
                  if pat.fullmatch(p["head"]["ref"]) and (p["head"].get("repo") or {}).get("full_name") == self.cfg["repo"]]
         return (found[0] if len(found) == 1 else None), len(found)
 
+    def too_many_writer_runs(self, issue):
+        """Rule 28 backstop: bound the writer/reviewer cycle without trusting either prompt."""
+        n = issue["number"]
+        events = self.gh.events(n)
+        marks = [t for t in (latest_decision_at(self.gh.comments(n), self.cfg["owner"]),
+                             last_labeled_at(events, self.L["human"])) if t]
+        since = max(marks) if marks else None
+        limit = 2 * self.cfg["max_review_rounds"] + 1
+        runs = writer_runs_since(events, self.L["writing"], since)
+        if runs <= limit:
+            return False
+        self.gh.comment(n, f"{ROUTER_HEADER}\ntoo many writer runs without reaching the owner: {runs} since the last "
+                           f"decision or hand-off (limit {limit}). Handing to the owner.")
+        self.relabel(issue, self.L["human"])
+        self.log(f"#{n}: {runs} writer runs (limit {limit}) -> `{self.L['human']}`")
+        return True
+
     def claim_reviewers(self, issues):
         """Rules 32-33: fire the reviewer only after CI finished on the PR head."""
         pulls = None
@@ -413,6 +446,8 @@ class Reconciler:
                 continue
             if active >= cap:
                 self.log(f"#{n}: eligible, waiting (writer cap {cap} reached)")
+                continue
+            if self.too_many_writer_runs(issue):
                 continue
             if self.claim_and_fire(issue, self.L["writing"], "writer"):
                 active += 1

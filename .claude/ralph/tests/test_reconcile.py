@@ -336,6 +336,54 @@ class LockAndStuck(unittest.TestCase):
         self.assertEqual(len([b for b in gh.bot_comments(1) if "ralph:stuck" in b]), 1)
 
 
+class WriterRunCap(unittest.TestCase):
+    """Rule 28: limit is 2 * max_review_rounds + 1 = 5 writer runs since the last decision or hand-off."""
+
+    def runs(self, k, hours_ago=3):
+        return [labeled(L["writing"], hours_ago + i * 0.01) for i in range(k)]
+
+    def test_under_limit_claims(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["queued"]], events=self.runs(5))
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [("W", 1)])
+
+    def test_over_limit_goes_to_human(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["queued"]], events=self.runs(6))
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [])
+        self.assertEqual(gh.labels(1), {L["human"]})
+        self.assertTrue(any("too many writer runs" in b for b in gh.bot_comments(1)))
+
+    def test_decision_resets_count(self):
+        gh = FakeGitHub()
+        dec = {"user": {"login": "okethan35"}, "created_at": ts(1), "updated_at": ts(1), "body": "**Decision:** try again"}
+        gh.add(1, [L["queued"]], events=self.runs(9), comments=[dec])
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [("W", 1)])
+
+    def test_edited_decision_does_not_reset(self):
+        gh = FakeGitHub()
+        dec = {"user": {"login": "okethan35"}, "created_at": ts(1), "updated_at": ts(0.5), "body": "**Decision:** try again"}
+        gh.add(1, [L["queued"]], events=self.runs(9), comments=[dec])
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [])
+
+    def test_forged_decision_does_not_reset(self):
+        gh = FakeGitHub()
+        dec = {"user": {"login": "stranger"}, "created_at": ts(1), "updated_at": ts(1), "body": "**Decision:** go"}
+        gh.add(1, [L["queued"]], events=self.runs(9), comments=[dec])
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [])
+
+    def test_human_label_resets_count(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["queued"]], events=self.runs(9) + [labeled(L["human"], 1)])
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [("W", 1)])
+
+
 class Closed(unittest.TestCase):
     def test_closed_issue_labels_stripped(self):
         gh = FakeGitHub()

@@ -39,6 +39,8 @@ If there is no trusted writer summary, or a check fails: comment `## Reviewer pa
 
 `ROUND` (rule 53) = the number of distinct `sha=` values in the `<!-- ralph:pass=... sha=... -->` markers of trusted `## Reviewer pass` comments created after `DECISION_AT` (a trusted pass without a marker counts as its own SHA), plus 1 if `SHA` is not among them. A re-review of a commit that was already reviewed is not a new round, and an owner decision starts the count again.
 
+`NO_NEW_COMMIT` (rule 53) is true when `SHA` equals the `sha=` of the latest trusted `## Reviewer pass` and a trusted `## Writer summary` was posted after that pass: the writer handed back without changing anything.
+
 ## Step 3: Read the change
 
 `gh api "$R/pulls/P/files?per_page=100"` and read every patch. `git fetch origin refs/heads/issue-N && git checkout -q FETCH_HEAD`. Never fetch `refs/pull/*` or any ref not validated in Step 2.
@@ -88,5 +90,6 @@ Post exactly one comment beginning:
 then one of these, followed by exactly one label move (rule 54):
 - A. No findings: `LGTM. Ready for human review.` Move N to `HUMAN`.
 - B. Only ESCALATE findings: each as file:line or rule, what's wrong, the decision needed. Move N to `HUMAN`.
-- C. Any FIXABLE and `ROUND` < `MAX_ROUNDS`: numbered list with file:line or rule, what's wrong, expected fix; ESCALATE findings listed separately. Move N to `QUEUED`. (That lets the reconciler start the writer; you never start other runs yourself.)
+- C. Any FIXABLE, `ROUND` < `MAX_ROUNDS`, and `NO_NEW_COMMIT` false: numbered list with file:line or rule, what's wrong, expected fix; ESCALATE findings listed separately. Move N to `QUEUED`. (That lets the reconciler start the writer; you never start other runs yourself.)
 - D. Any FIXABLE and `ROUND` >= `MAX_ROUNDS`: `Escalating: the round cap is reached.` then all findings. Move N to `HUMAN`.
+- D also applies, before C, when `NO_NEW_COMMIT` is true and there are findings: `Escalating: the writer produced no new commit.` then all findings. Move N to `HUMAN`.

@@ -12,3 +12,4 @@
 - **Two expiries escalate** (25): rejected runs (for example, at a usage limit) would otherwise claim and release forever.
 - **Writer on Sonnet, reviewer on Opus** (60): issues are tightly specified and gated by CI; review is where judgment pays.
 - **ralph-guard has its own Actions event policy** (21, 61): GitHub blocks `pull_request_target` by default on public repositories from 2026-12-02. The policy allows that event for `ralph-guard.yml` only, and the router dropped its pull-request trigger, so nothing else needs it.
+- **The loop is bounded in three places** (28, 46, 53): a fix round that produces no new commit used to look like the same round forever. The writer and reviewer now stop on it, and the reconciler caps writer runs per issue as a backstop that doesn't depend on either prompt.
