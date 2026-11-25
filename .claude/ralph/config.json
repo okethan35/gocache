@@ -1,0 +1,22 @@
+{
+  "owner": "okethan35",
+  "repo": "okethan35/gocache",
+  "default_branch": "main",
+  "gates": ["go test ./...", "go test -race ./..."],
+  "ci_check": "test",
+  "protected_paths": [".claude/**", ".github/**", "**/CLAUDE.md", "SPEC.md", "DECISIONS.md", "LESSONS.md", "go.mod", "go.sum"],
+  "test_globs": ["**/*_test.go"],
+  "max_writers": 3,
+  "claim_ttl_hours": 2,
+  "max_review_rounds": 2,
+  "spec_file": "SPEC.md",
+  "decisions_file": "DECISIONS.md",
+  "lessons_file": "LESSONS.md",
+  "labels": {
+    "queued": "ralph-loop",
+    "writing": "in-progress",
+    "review_queued": "needs-review",
+    "reviewing": "in-review",
+    "human": "human-review"
+  }
+}
