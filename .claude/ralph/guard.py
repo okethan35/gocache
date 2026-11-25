@@ -205,6 +205,8 @@ SETTINGS_PATHS = re.compile(
     r"|collaborators|hooks|keys|interaction-limits|environments|vulnerability-alerts"
     r"|automated-security-fixes|transfer|topics)\b"
 )
+WORKFLOW_RUNS = re.compile(r"(?:^|/)actions/(?:workflows/[^/\s]+/dispatches|runs/[^/\s]+/rerun)")
+PULL_PATH = re.compile(rf"(?:^|/)pulls/{NUM}/?(?:\?|$)")
 REPO_ROOT_PATH = re.compile(r"(?:^|/)repos/[^/\s?]+/[^/\s?]+/?(?:\?|$)")
 ISSUE_OR_COMMENT = re.compile(rf"(?:^|/)(?:issues/{NUM}|issues/comments/{NUM}|pulls/comments/{NUM})/?(?:\?|$)")
 
@@ -242,6 +244,10 @@ def check_cloud_only(toks, cfg, cwd):
         return
     if toks[0] == "gh" and len(toks) >= 2 and toks[1] in ("repo", "auth"):
         raise Blocked(14, f"`gh {toks[1]}` is not allowed in cloud runs")
+    if toks[0] == "gh" and len(toks) >= 2 and toks[1] == "workflow" and len(toks) >= 3 and toks[2] in ("run", "enable", "disable"):
+        raise Blocked(14, "agents never start, enable or disable workflows")
+    if toks[0] == "gh" and len(toks) >= 3 and toks[1] == "run" and toks[2] in ("rerun", "cancel", "delete"):
+        raise Blocked(14, "agents never re-run, cancel or delete workflow runs")
     if toks[0] == "gh" and len(toks) >= 3 and toks[1] in ("issue", "pr") and toks[2] in ("edit", "delete", "close", "lock", "transfer"):
         raise Blocked(14, f"`gh {toks[1]} {toks[2]}` is not allowed in cloud runs")
     if toks[0] == "git" and "push" in toks:
@@ -253,6 +259,10 @@ def check_cloud_only(toks, cfg, cwd):
                 raise Blocked(14, "agents never change rulesets, branch protection or repository settings")
             if REPO_ROOT_PATH.search(p) and method != "GET":
                 raise Blocked(14, "agents never change repository settings")
+            if WORKFLOW_RUNS.search(p) and method != "GET":
+                raise Blocked(14, "agents never dispatch or re-run workflows")
+            if PULL_PATH.search(p) and method in ("PATCH", "PUT", "DELETE"):
+                raise Blocked(14, "agents never edit pull requests (base, state or title)")
             if ISSUE_OR_COMMENT.search(p) and method in ("PATCH", "DELETE"):
                 raise Blocked(14, "agents never edit or delete issues or comments")
 

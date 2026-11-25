@@ -80,7 +80,7 @@ bash .claude/ralph/bootstrap.sh --dry-run   # see what it will do
 bash .claude/ralph/bootstrap.sh
 ```
 
-It creates the loop labels and the default-branch ruleset (PR required, no force push or deletion, required checks `ci_check` and `ralph-guard` pinned to GitHub Actions). It also creates an Actions event policy that allows `pull_request_target` for `ralph-guard.yml` only: GitHub blocks that event by default on public repositories from December 2, 2026, and without it `ralph-guard` never runs, so no PR could merge. It asks for the two trigger IDs and stores them as repository variables. It asks for the two fire tokens (input hidden) and stores them as Actions secrets. It turns on secret scanning and push protection where your plan allows. Running it again changes only what is missing.
+It creates the loop labels and the default-branch ruleset (PR required, no force push or deletion, required checks `ci_check` and `ralph-guard` pinned to GitHub Actions). It also creates an Actions event policy that allows `pull_request_target` for `ralph-guard.yml` only: GitHub blocks that event by default on public repositories from December 2, 2026, and without it `ralph-guard` never runs, so no PR could merge. It asks for the two trigger IDs and stores them as repository variables. It creates the `ralph` environment, which only the default branch can use, and asks for the two fire tokens (input hidden) and stores them as secrets of that environment. It turns on secret scanning and push protection where your plan allows. Running it again changes only what is missing.
 
 If the repository already has a ruleset on the default branch, the bootstrap says so; remove or merge the duplicate.
 
@@ -123,6 +123,12 @@ Add your language's build and test commands (for example `Bash(go test *)`).
 
    Expected: 1 prints `remote=true`; 2 to 5 are blocked with `Ralph guard (rule 13)` or `(rule 14)`; 6 is denied by a permission rule.
 4. **End to end**: open a tiny issue (for example a README line) with a `## Goal`, `## Files to touch`, and `**Blocked by:** none`, and add `ralph-loop`. Within a minute the `ralph-router` run should claim it and start the writer. Follow it through to your `human-review` @-mention.
+
+## Residual risks
+
+- **Repository-level Actions secrets are readable by any branch an agent can push.** An agent can push a branch with its own workflow, or run a workflow from its branch. Keep every secret you care about in an environment restricted to the default branch, like `ralph`, and none at repository level. On a private repository on GitHub Free, environments are not available: the bootstrap then stores the fire tokens as repository secrets, and this risk applies to them. Rotate a fire token (routines UI, then `gh secret set`) if you ever suspect it leaked.
+- **Self-merge.** Agents act as you, so GitHub cannot require "someone else" to approve. Merges are blocked by the guard hook and by `ralph-guard`, but an injected agent calling the merge API in a way the hook does not recognise is not fully preventable without a separate bot account for the agents.
+- **Single maintainer.** The loop trusts comments, labels and Decisions from `config.owner` only. Anyone you give write access to can label issues, edit issue bodies and push to `issue-N` branches, so treat collaborators as owner-equivalent or do not add any.
 
 ## Troubleshooting
 

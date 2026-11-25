@@ -20,7 +20,7 @@ Applies to any repository that uses the loop. Per-repository values live in `.cl
 11. The repository `.gitignore` covers `.env`, `.env.*`, `*.pem`, `*.key`, `id_*` and `.claude/settings.local.json`.
 12. The committed `.claude/settings.json` denies Read and Edit of `.env`, `.env.*`, `*.pem`, `*.key`, `id_*`, `~/.ssh/**` and `~/.aws/**` in every session.
 13. A PreToolUse hook active in every session blocks: `gh pr merge`; any `gh api` call to `pulls/N/merge`; and posting a comment whose body starts with `**Decision:**`.
-14. A PreToolUse hook active only when `CLAUDE_CODE_REMOTE=true` blocks: Edit or Write under `protected_paths`; `git push` to `config.default_branch`; any force push (`--force`, `--force-with-lease`, `-f`, `+refspec`); `gh repo` and `gh auth`; `gh api` calls to rulesets, branch protection or repository settings; PATCH or DELETE on issues and issue comments.
+14. A PreToolUse hook active only when `CLAUDE_CODE_REMOTE=true` blocks: Edit or Write under `protected_paths`; `git push` to `config.default_branch`; any force push (`--force`, `--force-with-lease`, `-f`, `+refspec`); `gh repo` and `gh auth`; `gh api` calls to rulesets, branch protection or repository settings; PATCH or DELETE on issues and issue comments; `gh workflow run`; and `gh api` calls that dispatch or re-run workflows, or that PATCH a pull request.
 15. A blocked call fails with exit code 2 and a one-line reason naming the rule.
 16. The default branch has a ruleset: PR required, no force push, no deletion, and required checks `config.ci_check` and `ralph-guard`, both pinned to the GitHub Actions app.
 17. `ralph-guard` runs on `pull_request_target`, never checks out PR code, and reads the diff through the API only.
@@ -45,7 +45,7 @@ Applies to any repository that uses the loop. Per-repository values live in `.cl
 34. When the owner adds `labels.queued` to an issue with no live claim, the reconciler removes every other loop label. When the issue has a live claim, it removes `labels.queued` and notes it in the summary.
 35. When an issue gets `labels.human`, the reconciler posts a `## Ralph router` comment as `github-actions[bot]` that @-mentions `config.owner` and includes the verdict line and the PR link.
 36. The summary lists every fire, every skip with its reason, every issue with more than one loop label, and every issue with both `labels.queued` and `labels.human`. Any of the last two also @-mentions the owner.
-37. Routines have no schedule. The reconciler is the only thing that starts them.
+37. Routines have no schedule. The reconciler is the only thing that starts them. Its job runs in a GitHub Environment named `ralph` whose deployment-branch policy allows only `config.default_branch`; the two fire tokens are secrets of that environment, never repository secrets.
 
 ## 5. Writer
 38. The payload must match `^[0-9]+$` and the issue must carry `labels.writing`. Otherwise the run stops without writing anything.
@@ -77,5 +77,5 @@ Applies to any repository that uses the loop. Per-repository values live in `.cl
 
 ## 8. Setup
 60. `.claude/ralph/SETUP.md` lists only the steps that cannot be scripted: install the Claude GitHub app, create the writer (Sonnet) and reviewer (Opus) routines with their environment settings, and create their API triggers.
-61. `.claude/ralph/bootstrap.sh` is idempotent. It creates the labels, applies the ruleset, sets the trigger IDs as repository variables, prompts for the two fire tokens as secrets, and enables secret scanning and push protection where the plan allows. It also creates an Actions event policy that allows `pull_request_target` for `ralph-guard.yml` only.
+61. `.claude/ralph/bootstrap.sh` is idempotent. It creates the labels, applies the ruleset, sets the trigger IDs as repository variables, prompts for the two fire tokens as secrets, and enables secret scanning and push protection where the plan allows. It also creates an Actions event policy that allows `pull_request_target` for `ralph-guard.yml` only. It creates the `ralph` environment with that policy and stores the fire tokens there. On a plan without environments it warns and stores them as repository secrets, and SETUP.md states the residual: any branch an agent can push can read repository secrets.
 62. `SETUP.md` includes a recommended `.claude/settings.local.json` allowlist with no `gh repo`, `gh auth` or `git remote` rules, and with `git push` limited to `issue-*` and `rework-*` branches.
