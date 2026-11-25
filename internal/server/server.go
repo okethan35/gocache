@@ -375,6 +375,10 @@ func Dispatch(s KV, line string) string {
 			return "False $nil$\n"
 		}
 		return fmt.Sprintf("True %d\n", secs)
+	case "EXPIRE":
+		return fmt.Sprintf("%d\n", s.Expire(cmd.Key, cmd.TTL))
+	case "PERSIST":
+		return fmt.Sprintf("%d\n", s.Persist(cmd.Key))
 	default:
 		return "invalid command\n"
 	}

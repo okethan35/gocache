@@ -13,7 +13,7 @@ type Command struct {
 	Op    string
 	Key   string
 	Value string // only meaningful for SET
-	TTL   int    // only meaningful for SET, -1 if not provided
+	TTL   int    // SET's TTL (-1 if not provided) or EXPIRE's seconds
 }
 
 // MaxTTLSeconds is the largest TTL a SET may ask for: 100 years (SPEC.md 2a
@@ -34,15 +34,20 @@ func ParseCommand(line string) (Command, error) {
 	}
 
 	op, rest, hasRest := strings.Cut(line, " ")
-	if op != "SET" && op != "GET" && op != "DEL" && op != "TTL" {
+	switch op {
+	case "SET", "GET", "DEL", "TTL", "EXPIRE", "PERSIST":
+	default:
 		return Command{}, ErrInvalidCommand
 	}
 	if !hasRest || rest == "" {
 		return Command{}, ErrInvalidCommand
 	}
 
-	if op == "SET" {
+	switch op {
+	case "SET":
 		return parseSet(rest)
+	case "EXPIRE":
+		return parseExpire(rest)
 	}
 	return parseGetDel(op, rest)
 }
@@ -57,6 +62,19 @@ func parseGetDel(op, rest string) (Command, error) {
 		return Command{}, ErrInvalidCommand
 	}
 	return Command{Op: op, Key: key, TTL: -1}, nil
+}
+
+// parseExpire parses "<key> <seconds>" (SPEC.md Phase 8 rules 13, 14, 16).
+func parseExpire(rest string) (Command, error) {
+	fields := strings.Fields(rest)
+	if len(fields) != 2 || strings.Contains(rest, "$") {
+		return Command{}, ErrInvalidCommand
+	}
+	n, err := strconv.Atoi(fields[1])
+	if err != nil || n < 0 || n > MaxTTLSeconds {
+		return Command{}, ErrInvalidCommand
+	}
+	return Command{Op: "EXPIRE", Key: fields[0], TTL: n}, nil
 }
 
 func parseSet(rest string) (Command, error) {
