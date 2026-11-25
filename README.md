@@ -44,24 +44,28 @@ go test -race ./...
 
 ## How it's built: the Ralph Loop
 
-Work is done by two scheduled agents under the owner's control.
+The owner plans and reviews; agents write and check the code. Agents can never merge.
 
-1. The owner writes the spec and the failing tests first, then files a GitHub issue with the goal, files to touch, gate commands, what is out of scope, and a `**Blocked by:**` line.
-2. A scheduled **writer** agent picks the oldest unblocked `ralph-loop` issue, implements it on an `issue-N-slug` branch, loops until the gate passes, opens a PR, and labels the issue `needs-review`.
-3. A scheduled **reviewer** agent, in fresh context, checks the diff against the spec for spec gaps, tests that cannot fail, and logic bugs. Fixable findings go back to the writer (max 2 rounds). Spec or scope questions escalate.
-4. The owner only sees `human-review` issues: reads the diff, breaks the code to confirm each test can fail, then merges.
+1. The owner pressure-tests an idea with `/grill`, turns it into numbered spec rules with `/spec`, and queues issues labeled `ralph-loop` with `/new-track`. The failing tests come first, and each issue lists the goal, files to touch, what is out of scope, and a `**Blocked by:**` line.
+2. The `ralph-router` reconciler (a GitHub Action) claims each ready issue (`in-progress`) and starts the **writer** routine. The routines have no schedule; the reconciler starts every run. The writer implements the issue on branch `issue-N`, opens a PR, and labels the issue `needs-review`.
+3. After CI finishes, the reconciler starts the **reviewer** routine (`in-review`). In fresh context it checks the diff against the spec for spec gaps, tests that cannot fail, and logic bugs. Fixable findings go back to the writer, at most `max_review_rounds` times (2). Spec or scope questions escalate.
+4. The owner gets an @-mention on `human-review`, reads the diff, breaks the code to confirm each test can fail, and merges the PR in the GitHub UI.
 
 Label flow:
 
 ```mermaid
 flowchart LR
-    A[ralph-loop] --> B[needs-review]
-    B --> C[human-review]
-    C --> D[merged]
-    B -- findings sent back --> A
+    A[ralph-loop] --> B[in-progress]
+    B --> C[needs-review]
+    C --> D[in-review]
+    D --> E[human-review]
+    E --> F[merged]
+    D -- findings sent back --> A
 ```
 
-Plain text: `ralph-loop -> needs-review -> human-review -> merged`, with the reviewer sending an issue back from `needs-review` to `ralph-loop`.
+Plain text: `ralph-loop -> in-progress -> needs-review -> in-review -> human-review -> merged`, with the reviewer sending an issue back from `in-review` to `ralph-loop`.
+
+See [`.claude/ralph/SETUP.md`](.claude/ralph/SETUP.md) for setup and [`.claude/ralph/SPEC.md`](.claude/ralph/SPEC.md) for the rules.
 
 ## Repo layout
 
