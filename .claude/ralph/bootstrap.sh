@@ -35,6 +35,12 @@ run() { if [ "$DRY" = 1 ]; then echo "  [dry-run] $*"; else "$@"; fi; }
 step() { echo; echo "== $*"; }
 
 echo "Ralph Loop bootstrap for $REPO$([ "$DRY" = 1 ] && echo ' (dry run)')"
+here="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)"
+if [ -n "$here" ] && [ "$here" != "$REPO" ]; then
+  echo "bootstrap: config.json says repo '$REPO' but this checkout is '$here'." >&2
+  echo "           Edit owner and repo in $CONFIG first (SETUP.md step 2)." >&2
+  exit 1
+fi
 perm="$(gh api "repos/$REPO" --jq '.permissions.admin' 2>/dev/null || echo false)"
 [ "$perm" = "true" ] || { echo "bootstrap: your gh login is not an admin of $REPO" >&2; exit 1; }
 
