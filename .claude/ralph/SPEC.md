@@ -29,7 +29,7 @@ Applies to any repository that uses the loop. Per-repository values live in `.cl
 20. Every skill has `disable-model-invocation: true`.
 
 ## 4. Reconciler
-21. Triggers: issue labeled or closed, PR closed, completion of the `config.ci_check` workflow, a 30-minute schedule, and manual dispatch.
+21. Triggers: issue labeled, unlabeled, closed or reopened; completion of the `config.ci_check` workflow; a 30-minute schedule; and manual dispatch. There is no pull-request trigger: a merged PR closes its issue, which runs the reconciler.
 22. All runs share one concurrency group and never cancel a running job. Every run recomputes from current GitHub state and ignores which event started it.
 23. Each run, in order: validate config; strip loop labels from closed issues; release stale claims; apply requeues; claim and fire reviewers; claim and fire writers; write the summary.
 24. A claim is stale when its label was added more than `claim_ttl_hours` ago. A stale `labels.writing` returns to `labels.queued` and a stale `labels.reviewing` to `labels.review_queued`, each with a `## Ralph router` comment.
@@ -77,5 +77,5 @@ Applies to any repository that uses the loop. Per-repository values live in `.cl
 
 ## 8. Setup
 60. `.claude/ralph/SETUP.md` lists only the steps that cannot be scripted: install the Claude GitHub app, create the writer (Sonnet) and reviewer (Opus) routines with their environment settings, and create their API triggers.
-61. `.claude/ralph/bootstrap.sh` is idempotent. It creates the labels, applies the ruleset, sets the trigger IDs as repository variables, prompts for the two fire tokens as secrets, and enables secret scanning and push protection where the plan allows.
+61. `.claude/ralph/bootstrap.sh` is idempotent. It creates the labels, applies the ruleset, sets the trigger IDs as repository variables, prompts for the two fire tokens as secrets, and enables secret scanning and push protection where the plan allows. It also creates an Actions event policy that allows `pull_request_target` for `ralph-guard.yml` only.
 62. `SETUP.md` includes a recommended `.claude/settings.local.json` allowlist with no `gh repo`, `gh auth` or `git remote` rules, and with `git push` limited to `issue-*` and `rework-*` branches.

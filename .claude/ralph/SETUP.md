@@ -80,7 +80,7 @@ bash .claude/ralph/bootstrap.sh --dry-run   # see what it will do
 bash .claude/ralph/bootstrap.sh
 ```
 
-It creates the loop labels and the default-branch ruleset (PR required, no force push or deletion, required checks `ci_check` and `ralph-guard` pinned to GitHub Actions). It asks for the two trigger IDs and stores them as repository variables. It asks for the two fire tokens (input hidden) and stores them as Actions secrets. It turns on secret scanning and push protection where your plan allows. Running it again changes only what is missing.
+It creates the loop labels and the default-branch ruleset (PR required, no force push or deletion, required checks `ci_check` and `ralph-guard` pinned to GitHub Actions). It also creates an Actions event policy that allows `pull_request_target` for `ralph-guard.yml` only: GitHub blocks that event by default on public repositories from December 2, 2026, and without it `ralph-guard` never runs, so no PR could merge. It asks for the two trigger IDs and stores them as repository variables. It asks for the two fire tokens (input hidden) and stores them as Actions secrets. It turns on secret scanning and push protection where your plan allows. Running it again changes only what is missing.
 
 If the repository already has a ruleset on the default branch, the bootstrap says so; remove or merge the duplicate.
 
@@ -128,5 +128,5 @@ Add your language's build and test commands (for example `Bash(go test *)`).
 
 - **The reconciler run fails with "routine ID or fire token is not configured"**: rerun the bootstrap.
 - **A review never starts**: the router's `workflow_run` names the CI workflow `ci`; check that your CI workflow's `name:` matches, and that the job name equals `config.ci_check`.
-- **A PR waits on `ralph-guard` forever**: the guard runs from the default branch, so it does not run on the PR that first adds it. Merge that PR before running the bootstrap (which makes `ralph-guard` required).
+- **A PR waits on `ralph-guard` forever**: either the guard workflow is not on the default branch yet (it does not run on the PR that first adds it; merge that PR before running the bootstrap, which makes `ralph-guard` required), or `pull_request_target` is blocked for it. Check Settings > Actions > Policies and Policy insights; rerun the bootstrap to create the policy.
 - **Everything is blocked locally with "no working Python found"**: install Python 3, or make `python3` resolve to a real interpreter (on Windows the Store alias does not count).

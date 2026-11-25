@@ -97,6 +97,27 @@ fi
 others="$(gh api "repos/$REPO/rulesets" --jq ".[] | select(.name!=\"$RULESET_NAME\") | .name")"
 [ -n "$others" ] && echo "  note    other rulesets also apply: $(echo "$others" | paste -sd, -). Remove any that duplicate this one."
 
+# ---- 2b. Actions event policy: allow pull_request_target for ralph-guard --
+# GitHub blocks pull_request_target by default on public repositories from 2026-12-02
+# unless an event policy allows it. ralph-guard is a required check and runs on that
+# event, so without this policy no PR could ever merge. The policy targets only
+# ralph-guard.yml and allows only that event (it is an allow-list for the workflow).
+step "Actions event policy"
+POLICY_NAME="Ralph Loop: allow pull_request_target for ralph-guard"
+API_VER="X-GitHub-Api-Version: 2026-03-10"
+printf '%s' "{\"name\":\"$POLICY_NAME\",\"enforcement\":\"active\",\"conditions\":{\"workflow_path\":{\"include\":[\".github/workflows/ralph-guard.yml\"],\"exclude\":[]}},\"rules\":[{\"type\":\"restrict_action_events\",\"parameters\":{\"allowed_events\":[\"pull_request_target\"]}}]}" > "$tmp"
+pid="$(gh api -H "$API_VER" "repos/$REPO/actions/policies" --jq ".policies[] | select(.name==\"$POLICY_NAME\") | .id" 2>/dev/null | head -1 || true)"
+if [ -n "$pid" ]; then
+  echo "  update  '$POLICY_NAME' (id $pid)"
+  run gh api -X PUT -H "$API_VER" "repos/$REPO/actions/policies/$pid" --input "$tmp" --silent
+elif [ "$DRY" = 1 ]; then
+  echo "  [dry-run] would create '$POLICY_NAME'"
+elif gh api -X POST -H "$API_VER" "repos/$REPO/actions/policies" --input "$tmp" --silent 2>/dev/null; then
+  echo "  create  '$POLICY_NAME'"
+else
+  echo "  warn    could not create the event policy. Public repos need it (Settings > Actions > Policies): allow pull_request_target for .github/workflows/ralph-guard.yml."
+fi
+
 # ---- 3. Routine IDs as repository variables ------------------------------
 step "Routine trigger IDs (repository variables)"
 vars="$(gh variable list --repo "$REPO" --json name --jq '.[].name' 2>/dev/null || true)"

@@ -6,13 +6,12 @@ name: ralph-router
 # Fire tokens live only in Actions secrets; the agents hold no credentials for firing.
 #
 # Label changes made here with GITHUB_TOKEN do not trigger new workflow runs, so the
-# reconciler never re-triggers itself.
+# reconciler never re-triggers itself. There is no pull_request trigger: a merged PR with
+# "Closes #N" closes its issue, and that `issues: closed` event runs the reconciler.
 
 on:
   issues:
     types: [labeled, unlabeled, closed, reopened]
-  pull_request_target: # base-branch copy of this file, so a PR cannot change it
-    types: [closed]
   workflow_run: # CI finished: a queued review may now be ready (rule 32)
     workflows: [ci] # must be the `name:` of the repo's CI workflow (SETUP.md)
     types: [completed]
