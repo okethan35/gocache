@@ -11,3 +11,4 @@
 - **A failed fire reverts its claim** (31): a claimed issue must never exist without a run behind it.
 - **Two expiries escalate** (25): rejected runs (for example, at a usage limit) would otherwise claim and release forever.
 - **Writer on Sonnet, reviewer on Opus** (60): issues are tightly specified and gated by CI; review is where judgment pays.
+- **ralph-guard has its own Actions event policy** (21, 61): GitHub blocks `pull_request_target` by default on public repositories from 2026-12-02. The policy allows that event for `ralph-guard.yml` only, and the router dropped its pull-request trigger, so nothing else needs it.
