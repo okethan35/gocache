@@ -129,6 +129,24 @@ class CloudOnly(unittest.TestCase):
             self.assertIn("rule 14", blocked(cmd, True) or "", cmd)
         self.assertIsNone(blocked("gh api repos/o/r/rulesets/27895579", True))
 
+    def test_workflow_dispatch_and_pr_edits(self):
+        for cmd in (
+            "gh workflow run ralph-router.yml --ref x",
+            "gh run rerun 12345",
+            "gh api -X POST repos/o/r/actions/workflows/ralph-router.yml/dispatches -f ref=x",
+            "gh api -X POST repos/o/r/actions/runs/123/rerun",
+            "gh api -X PATCH repos/o/r/pulls/40 -f base=x",
+            "gh api -X PATCH $R/pulls/$P -f state=closed",
+        ):
+            self.assertIn("rule 14", blocked(cmd, True) or "", cmd)
+        for cmd in (
+            "gh api repos/o/r/actions/runs?branch=issue-24",
+            "gh api $R/pulls/40",
+            "gh api \"$R/pulls/40/files?per_page=100\"",
+            "gh workflow list",
+        ):
+            self.assertIsNone(blocked(cmd, True), cmd)
+
     def test_issue_and_comment_edits(self):
         for cmd in (
             "gh api -X PATCH $R/issues/24 -f body=x",

@@ -134,21 +134,55 @@ for role in WRITER REVIEWER; do
   echo "  set     $var"
 done
 
-# ---- 4. Fire tokens as Actions secrets -----------------------------------
-step "Routine fire tokens (Actions secrets)"
-secrets="$(gh secret list --repo "$REPO" --json name --jq '.[].name')"
+# ---- 4. The `ralph` environment and the fire tokens (rule 37) ----------
+# The tokens are secrets of an environment that only the default branch can deploy to,
+# so a workflow an agent runs from another branch (workflow_dispatch --ref, on: push)
+# cannot read them. Plans without environments fall back to repository secrets.
+step "Environment 'ralph' (default branch only)"
+DEFAULT_BRANCH="$(cfg default_branch)"
+ENV_OK=0
+printf '%s' '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}' > "$tmp"
+if [ "$DRY" = 1 ]; then
+  echo "  [dry-run] create or update environment 'ralph' with a custom branch policy for '$DEFAULT_BRANCH'"
+  ENV_OK=1
+elif gh api -X PUT "repos/$REPO/environments/ralph" --input "$tmp" --silent 2>/dev/null; then
+  ENV_OK=1
+  have="$(gh api "repos/$REPO/environments/ralph/deployment-branch-policies" --jq '.branch_policies[] | .name + " " + (.type // "branch")' 2>/dev/null || true)"
+  if printf '%s\n' "$have" | grep -qx "$DEFAULT_BRANCH branch"; then
+    echo "  ok      environment 'ralph', deployable only from '$DEFAULT_BRANCH'"
+  else
+    printf '{"name":"%s","type":"branch"}' "$DEFAULT_BRANCH" > "$tmp"
+    gh api -X POST "repos/$REPO/environments/ralph/deployment-branch-policies" --input "$tmp" --silent
+    echo "  set     environment 'ralph', deployable only from '$DEFAULT_BRANCH'"
+  fi
+  extra="$(printf '%s\n' "$have" | grep -vx "$DEFAULT_BRANCH branch" | grep -v '^$' || true)"
+  [ -n "$extra" ] && echo "  WARN    'ralph' also allows: $(echo "$extra" | paste -sd, -). Remove those branch policies."
+else
+  echo "  warn    environments are not available on this plan. The tokens go into repository secrets,"
+  echo "          which any branch an agent can push can read (see SETUP.md, Residual risks)."
+fi
+
+step "Routine fire tokens"
+if [ "$ENV_OK" = 1 ]; then where=(--env ralph); label="environment 'ralph'"; else where=(); label="repository"; fi
+secrets="$(gh secret list --repo "$REPO" ${where[@]+"${where[@]}"} --json name --jq '.[].name' 2>/dev/null || true)"
+repo_secrets="$(gh secret list --repo "$REPO" --json name --jq '.[].name')"
 for role in WRITER REVIEWER; do
   sec="RALPH_${role}_FIRE_TOKEN"
   if printf '%s\n' "$secrets" | grep -qxF "$sec"; then
-    echo "  ok      $sec (to replace it: gh secret set $sec --repo $REPO)"
-    continue
+    echo "  ok      $sec in $label (to replace it: gh secret set $sec --repo $REPO ${where[*]+${where[*]}})"
+  elif [ "$DRY" = 1 ]; then
+    echo "  [dry-run] would ask for $sec and store it in $label"
+  else
+    read -r -s -p "  $(printf %s "$role" | tr "[:upper:]" "[:lower:]") routine fire token (input hidden): " tok; echo
+    [ -n "$tok" ] || { echo "bootstrap: empty token" >&2; exit 1; }
+    printf '%s' "$tok" | gh secret set "$sec" --repo "$REPO" ${where[@]+"${where[@]}"}
+    unset tok
+    echo "  set     $sec in $label"
   fi
-  if [ "$DRY" = 1 ]; then echo "  [dry-run] would ask for $sec and store it"; continue; fi
-  read -r -s -p "  $(printf %s "$role" | tr "[:upper:]" "[:lower:]") routine fire token (input hidden): " tok; echo
-  [ -n "$tok" ] || { echo "bootstrap: empty token" >&2; exit 1; }
-  printf '%s' "$tok" | gh secret set "$sec" --repo "$REPO"
-  unset tok
-  echo "  set     $sec"
+  if [ "$ENV_OK" = 1 ] && printf '%s\n' "$repo_secrets" | grep -qxF "$sec"; then
+    echo "  WARN    a repository-level $sec still exists and is readable from any branch."
+    echo "          After the next reconciler run fires successfully, delete it: gh secret delete $sec --repo $REPO"
+  fi
 done
 
 # ---- 5. Secret scanning and push protection -------------------------------
