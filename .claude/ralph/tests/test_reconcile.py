@@ -26,6 +26,9 @@ class FakeGitHub:
         self.events_ = {}   # number -> list
         self.comments_ = {}  # number -> list
         self.label_calls = []
+        self.pulls = []      # open PRs
+        self.runs = {}       # sha -> check runs
+        self.locked = []
 
     def add(self, n, labels=(), body="**Blocked by:** none", state="open", state_reason=None, events=(), comments=()):
         self.issues[n] = {"number": n, "labels": [{"name": l} for l in labels], "body": body,
@@ -55,7 +58,26 @@ class FakeGitHub:
         self.issues[n]["labels"] = [{"name": l} for l in labels]
 
     def comment(self, n, body):
-        self.comments_.setdefault(n, []).append({"user": {"login": rc.BOT}, "body": body})
+        self.comments_.setdefault(n, []).append({"user": {"login": rc.BOT}, "body": body, "created_at": ts(0)})
+
+    def lock(self, n):
+        self.locked.append(n)
+        self.issues[n]["locked"] = True
+
+    def open_pulls(self):
+        return self.pulls
+
+    def check_runs(self, sha, name):
+        return self.runs.get(sha, [])
+
+    def add_pr(self, n, sha="abc1234", ref=None, repo="okethan35/gocache", runs=("completed",)):
+        ref = ref or f"issue-{n}"
+        self.pulls.append({"head": {"ref": ref, "sha": sha, "repo": {"full_name": repo}},
+                           "html_url": f"https://github.com/{repo}/pull/{100 + n}"})
+        self.runs[sha] = [{"status": st, "conclusion": "success" if st == "completed" else None} for st in runs]
+
+    def bot_comments(self, n):
+        return [c["body"] for c in self.comments(n) if c["user"]["login"] == rc.BOT]
 
     def labels(self, n):
         return rc.label_names(self.issues[n])
@@ -163,6 +185,7 @@ class Reviewers(unittest.TestCase):
     def test_claims_review_queued(self):
         gh = FakeGitHub()
         gh.add(1, [L["review_queued"]])
+        gh.add_pr(1)
         _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [("R", 1)])
         self.assertEqual(gh.labels(1), {L["reviewing"]})
@@ -191,6 +214,7 @@ class Stale(unittest.TestCase):
     def test_stale_reviewer_released(self):
         gh = FakeGitHub()
         gh.add(1, [L["reviewing"]], events=[labeled(L["reviewing"], 3)])
+        gh.add_pr(1)
         _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [("R", 1)])
 
@@ -201,7 +225,8 @@ class Stale(unittest.TestCase):
         _, fires, _ = run(gh)
         self.assertEqual(gh.labels(1), {L["human"]})
         self.assertEqual(fires.calls, [])
-        self.assertIn("two runs expired without a hand-off", gh.comments(1)[-1]["body"])
+        self.assertTrue(any("two runs expired without a hand-off" in b for b in gh.bot_comments(1)))
+        self.assertTrue(any("two runs expired" in b and rc.NOTIFIED_MARKER in b for b in gh.bot_comments(1)))
 
     def test_handoff_between_expiries_resets(self):
         gh = FakeGitHub()
@@ -217,6 +242,98 @@ class Stale(unittest.TestCase):
         gh.add(1, [L["writing"]], events=[labeled(L["writing"], 3)], comments=[forged])
         _, fires, _ = run(gh)
         self.assertEqual(fires.calls, [("W", 1)])
+
+
+class ReviewerCI(unittest.TestCase):
+    def test_waits_for_ci(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["review_queued"]], events=[labeled(L["review_queued"], 0.1)])
+        gh.add_pr(1, runs=("completed", "in_progress"))
+        rec, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [])
+        self.assertEqual(gh.labels(1), {L["review_queued"]})
+        self.assertTrue(any("waiting for" in l for l in rec.lines))
+
+    def test_slug_branch_still_matches(self):
+        gh = FakeGitHub()
+        gh.add(24, [L["review_queued"]])
+        gh.add_pr(24, ref="issue-24-expire-persist-wir")
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [("R", 24)])
+
+    def test_fork_pr_ignored(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["review_queued"]], events=[labeled(L["review_queued"], 0.1)])
+        gh.add_pr(1, repo="attacker/gocache")
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [])
+
+    def test_no_ci_after_30_minutes_goes_to_human(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["review_queued"]], events=[labeled(L["review_queued"], 0.6)])
+        gh.add_pr(1, runs=())
+        run(gh)
+        self.assertEqual(gh.labels(1), {L["human"]})
+        self.assertTrue(any("No finished" in b for b in gh.bot_comments(1)))
+
+
+class Requeue(unittest.TestCase):
+    def test_owner_requeue_from_human(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["queued"], L["human"]])
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [("W", 1)])
+        self.assertEqual(gh.labels(1), {L["writing"]})
+
+    def test_requeue_on_live_claim_removes_queued(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["queued"], L["writing"]], events=[labeled(L["writing"], 0.2)])
+        _, fires, _ = run(gh)
+        self.assertEqual(fires.calls, [])
+        self.assertEqual(gh.labels(1), {L["writing"]})
+
+
+class Notify(unittest.TestCase):
+    def test_notifies_once(self):
+        gh = FakeGitHub()
+        lgtm = {"user": {"login": "okethan35"}, "created_at": ts(0.2),
+                "body": "## Reviewer pass 1\n<!-- ralph:pass=1 sha=abc -->\n**PR:** x\n**Summary:**\n- a\n\nLGTM. Ready for human review."}
+        gh.add(1, [L["human"]], events=[labeled(L["human"], 0.1)], comments=[lgtm])
+        gh.add_pr(1)
+        run(gh)
+        notes = [b for b in gh.bot_comments(1) if rc.NOTIFIED_MARKER in b]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("@okethan35", notes[0])
+        self.assertIn("LGTM. Ready for human review.", notes[0])
+        self.assertIn("/pull/101", notes[0])
+        run(gh)
+        self.assertEqual(len([b for b in gh.bot_comments(1) if rc.NOTIFIED_MARKER in b]), 1)
+
+    def test_notifies_again_after_new_human_label(self):
+        gh = FakeGitHub()
+        old = {"user": {"login": rc.BOT}, "created_at": ts(5), "body": f"{rc.ROUTER_HEADER}\n{rc.NOTIFIED_MARKER}\n@x"}
+        gh.add(1, [L["human"]], events=[labeled(L["human"], 6), labeled(L["human"], 1)], comments=[old])
+        run(gh)
+        self.assertEqual(len([b for b in gh.bot_comments(1) if rc.NOTIFIED_MARKER in b]), 2)
+
+
+class LockAndStuck(unittest.TestCase):
+    def test_locks_loop_issues_only(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["queued"]])
+        gh.add(2, ["bug"])
+        run(gh)
+        self.assertEqual(gh.locked, [1])
+        run(gh)
+        self.assertEqual(gh.locked, [1])  # already locked
+
+    def test_stuck_reported_once(self):
+        gh = FakeGitHub()
+        gh.add(1, [L["writing"], L["reviewing"]], events=[labeled(L["writing"], 0.1), labeled(L["reviewing"], 0.1)])
+        rec, _, _ = run(gh)
+        self.assertTrue(any("STUCK" in l for l in rec.lines))
+        run(gh)
+        self.assertEqual(len([b for b in gh.bot_comments(1) if "ralph:stuck" in b]), 1)
 
 
 class Closed(unittest.TestCase):
